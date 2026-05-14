@@ -3,9 +3,37 @@ import  supabase  from '../config/supabase.js';
 import { scrapeQueue, scoreQueue } from '../queues/index.js';
 import auth from '../middleware/auth.js';
 import Groq from 'groq-sdk';
+import { formatJobForRendering } from '../utils/jobFormatter.js';
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const router = express.Router();
+
+const DASHBOARD_TIMELINES = ['today', 'weekly', 'monthly', 'all_time'];
+const SCORING_STATUSES = ['scraping', 'scraped', 'scoring', 'generating'];
+
+function getTimelineStart(timeline) {
+  const now = new Date();
+  if (timeline === 'today') {
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+  }
+  if (timeline === 'weekly') {
+    const start = new Date(now);
+    start.setDate(now.getDate() - 7);
+    return start.toISOString();
+  }
+  if (timeline === 'monthly') {
+    const start = new Date(now);
+    start.setMonth(now.getMonth() - 1);
+    return start.toISOString();
+  }
+  return null;
+}
+
+function applyDashboardScope(query, userId, since) {
+  let scoped = query.eq('user_id', userId);
+  if (since) scoped = scoped.gte('created_at', since);
+  return scoped;
+}
 
 // ── POST /jobs/url — scrape + score against all CVs ──────────────────────────
 router.post('/url', auth, async (req, res) => {
@@ -91,6 +119,13 @@ Return ONLY valid JSON:
       console.error('Groq job parsing failed, falling back to raw_text:', err.message);
     }
 
+    const renderSections = await formatJobForRendering({
+      title: parsedJob.title,
+      company: parsedJob.company,
+      location: parsedJob.location,
+      description: parsedJob.description,
+    });
+
     // Create job record
     const { data: job, error: jobError } = await supabase
       .from('jobs')
@@ -100,6 +135,8 @@ Return ONLY valid JSON:
         company: parsedJob.company,
         location: parsedJob.location,
         description: parsedJob.description,
+        raw_description: parsedJob.description,
+        render_description: renderSections,
         source_type: 'paste',
         status: 'scraped',
       })
@@ -117,6 +154,78 @@ Return ONLY valid JSON:
     res.status(202).json({ message: 'Job queued for scoring.', job_id: job.id });
   } catch (err) {
     console.error('POST /jobs/paste error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /jobs/dashboard — summary cards + visible pipeline rows ─────────────
+router.get('/dashboard', auth, async (req, res) => {
+  try {
+    const timeline = DASHBOARD_TIMELINES.includes(req.query.timeline)
+      ? req.query.timeline
+      : 'weekly';
+    const since = getTimelineStart(timeline);
+
+    const countJobs = (builder) =>
+      applyDashboardScope(
+        builder(supabase.from('jobs').select('id', { count: 'exact', head: true })),
+        req.user.id,
+        since
+      );
+
+    const [
+      totalResult,
+      recommendedResult,
+      readyResult,
+      appliedResult,
+      scoringResult,
+      jobsResult,
+    ] = await Promise.all([
+      countJobs((query) => query),
+      countJobs((query) => query.eq('status', 'recommended')),
+      countJobs((query) => query.eq('status', 'ready')),
+      countJobs((query) => query.eq('status', 'applied')),
+      countJobs((query) => query.in('status', SCORING_STATUSES)),
+      applyDashboardScope(
+        supabase
+          .from('jobs')
+          .select(`
+            id, title, company, location, logo_url, source_type, source_url,
+            match_score, status, selected_cv_id, created_at, updated_at,
+            job_cv_matches (cv_id, score, recommended),
+            documents (id, tailored_cv_url, cover_letter_url)
+          `)
+          .order('created_at', { ascending: false })
+          .limit(25),
+        req.user.id,
+        since
+      ),
+    ]);
+
+    const firstError = [
+      totalResult,
+      recommendedResult,
+      readyResult,
+      appliedResult,
+      scoringResult,
+      jobsResult,
+    ].find((result) => result.error)?.error;
+
+    if (firstError) throw firstError;
+
+    res.json({
+      timeline,
+      stats: {
+        total_jobs: totalResult.count || 0,
+        recommended: recommendedResult.count || 0,
+        ready: readyResult.count || 0,
+        applied: appliedResult.count || 0,
+        scoring: scoringResult.count || 0,
+      },
+      jobs: jobsResult.data || [],
+    });
+  } catch (err) {
+    console.error('GET /jobs/dashboard error:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -150,7 +259,8 @@ router.post('/:id/select-cv', auth, async (req, res) => {
     if (matchError || !match)
       return res.status(404).json({ error: 'No match score found for this CV. Score it first.' });
 
-    // Update job with selected CV
+    // Manual user selection always starts document generation. The low-match
+    // brake belongs to unattended automation, not explicit user action.
     await supabase
       .from('jobs')
       .update({
@@ -158,23 +268,19 @@ router.post('/:id/select-cv', auth, async (req, res) => {
         match_score: match.score,
         match_reasoning: match.reasoning,
         gaps: match.gaps,
-        status: match.score >= 70 ? 'generating' : 'low_match',
+        status: 'generating',
       })
       .eq('id', job.id);
 
-    // Queue docgen if score is good enough
-    if (match.score >= 70) {
-      const { docgenQueue } = await import('../queues/index.js');
-      await docgenQueue.add('generate-docs', {
-        job_id: job.id,
-        cv_id,
-        user_id: req.user.id,
-      });
-      return res.json({ message: 'Docs generation started.', score: match.score });
-    }
+    const { docgenQueue } = await import('../queues/index.js');
+    await docgenQueue.add('generate-docs', {
+      job_id: job.id,
+      cv_id,
+      user_id: req.user.id,
+    });
 
-    res.json({
-      message: 'CV selected but score is below threshold. You can still manually generate docs.',
+    return res.json({
+      message: 'Docs generation started.',
       score: match.score,
     });
   } catch (err) {
@@ -218,7 +324,7 @@ router.get('/:id', auth, async (req, res) => {
       .from('jobs')
       .select(`
         *,
-        job_cv_matches (cv_id, score, reasoning, gaps, recommended),
+        job_cv_matches (cv_id, score, reasoning, gaps, summary, recommended),
         documents (id, tailored_cv_url, cover_letter_url, generated_at)
       `)
       .eq('id', req.params.id)

@@ -109,7 +109,8 @@ const scoreWorker = new Worker(
       .single();
 
     if (jobError || !jobRecord) throw new Error(`Job ${job_id} not found`);
-    if (!jobRecord.description) throw new Error(`Job ${job_id} has no description to score against`);
+    const scoringDescription = jobRecord.raw_description || jobRecord.description;
+    if (!scoringDescription) throw new Error(`Job ${job_id} has no description to score against`);
 
     await supabase.from('jobs').update({ status: 'scoring' }).eq('id', job_id);
 
@@ -127,7 +128,7 @@ const scoreWorker = new Worker(
 
     // ── Step 3: Extract keywords and embed them ───────────────────────────────
     console.log(`[scoreWorker] Extracting requirements for better RAG match...`);
-    const jobRequirements = await extractJobRequirements(jobRecord.description);
+    const jobRequirements = await extractJobRequirements(scoringDescription);
     console.log(`[scoreWorker] Extracted requirements: ${jobRequirements}`);
     const jobEmbedding = await embedText(jobRequirements);
 
@@ -144,7 +145,7 @@ const scoreWorker = new Worker(
           }
 
           // Groq score
-          const result = await scoreMatchWithGroq(jobRecord.description, chunks);
+          const result = await scoreMatchWithGroq(scoringDescription, chunks);
 
           return {
             cv_id: cv.id,

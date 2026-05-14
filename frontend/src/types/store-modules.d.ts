@@ -8,6 +8,14 @@ declare module '*authStore.js' {
   export default useAuthStore
 }
 
+declare module '*cvsStore.js' {
+  const useCVsStore: {
+    (selector: StoreSelector): any
+    getState(): any
+  }
+  export default useCVsStore
+}
+
 declare module '*toastStore.js' {
   const useToastStore: {
     (selector: StoreSelector): any
@@ -33,6 +41,23 @@ declare module '*api/cvs.js' {
   export function getQuestions(id: string): Promise<any>
   export function applyEnhancement(id: string, questions: any[], answers: any[]): Promise<any>
   export function skipEnhancement(id: string): Promise<any>
+}
+
+declare module '*api/jobs.js' {
+  export function submitUrl(url: string): Promise<any>
+  export function submitPaste(raw_text: string): Promise<any>
+  export function selectCV(jobId: string, cv_id: string): Promise<any>
+  export function listJobs(params?: any): Promise<any>
+  export function getDashboard(params?: any): Promise<any>
+  export function getJob(id: string): Promise<any>
+  export function deleteJob(id: string): Promise<any>
+  export function triggerDocs(jobId: string): Promise<any>
+}
+
+declare module '*api/applications.js' {
+  export function markApplied(jobId: string): Promise<any>
+  export function updateStatus(id: string, status: string, notes?: string): Promise<any>
+  export function listApplications(params?: any): Promise<any>
 }
 
 declare module '*api/auth.js' {

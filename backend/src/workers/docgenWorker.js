@@ -484,14 +484,15 @@ const docgenWorker = new Worker(
     if (cvError || !cvRecord) throw new Error(`CV ${cv_id} not found`);
 
     await supabase.from('jobs').update({ status: 'generating' }).eq('id', job_id);
+    const sourceJobDescription = jobRecord.raw_description || jobRecord.description;
 
     // Step 2: Generate tailored CV
     if (!cvRecord.raw_text) throw new Error(`CV ${cv_id} has no raw text to process`);
-    const tailoredCV = await generateTailoredCV(jobRecord.description, cvRecord.raw_text);
+    const tailoredCV = await generateTailoredCV(sourceJobDescription, cvRecord.raw_text);
     console.log(`[docgenWorker] Tailored CV generated — ATS: ${tailoredCV.ats_score_estimate}`);
 
     // Step 4: Generate cover letter
-    const coverLetter = await generateCoverLetter(jobRecord.description, tailoredCV, jobRecord);
+    const coverLetter = await generateCoverLetter(sourceJobDescription, tailoredCV, jobRecord);
     console.log(`[docgenWorker] Cover letter generated`);
 
     // Step 5: Build HTML

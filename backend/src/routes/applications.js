@@ -46,7 +46,8 @@ router.post('/:jobId', auth, async (req, res) => {
     const { error: jobUpdateError } = await supabase
       .from('jobs')
       .update({ status: 'applied' })
-      .eq('id', jobId);
+      .eq('id', jobId)
+      .eq('user_id', req.user.id);
 
     if (jobUpdateError) {
       return res.status(500).json({ error: jobUpdateError.message });

@@ -3,6 +3,7 @@ import axios from 'axios';
 import redis from '../config/redis.js';
 import  supabase  from '../config/supabase.js';
 import { scoreQueue } from '../queues/index.js';
+import { formatJobForRendering } from '../utils/jobFormatter.js';
 
 const scrapeWorker = new Worker(
   'scrape-queue',
@@ -37,6 +38,13 @@ const scrapeWorker = new Worker(
 
     console.log(`[scrapeWorker] Scraped — ${scraped.title} at ${scraped.company}`);
 
+    const renderSections = await formatJobForRendering({
+      title: scraped.title,
+      company: scraped.company,
+      location: scraped.location,
+      description: scraped.description,
+    });
+
     // ── Step 2: Update job record with scraped data ───────────────────────────
     const { error: updateError } = await supabase
       .from('jobs')
@@ -46,6 +54,8 @@ const scrapeWorker = new Worker(
         location: scraped.location,
         logo_url: scraped.logo_url,
         description: scraped.description,
+        raw_description: scraped.description,
+        render_description: renderSections,
         raw_details: scraped.details,
         status: 'scraped',
       })

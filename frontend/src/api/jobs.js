@@ -25,6 +25,10 @@ export const selectCV = (jobId, cv_id) =>
 export const listJobs = (params = {}) =>
   wrap(() => client.get('/jobs', { params }))
 
+// GET /jobs/dashboard — params: { timeline }
+export const getDashboard = (params = {}) =>
+  wrap(() => client.get('/jobs/dashboard', { params }))
+
 // GET /jobs/:id
 export const getJob = (id) =>
   wrap(() => client.get(`/jobs/${id}`))
