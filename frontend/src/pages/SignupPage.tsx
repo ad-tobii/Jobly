@@ -42,9 +42,9 @@ function friendlySignupError(error: string) {
 
 export default function SignupPage() {
   const navigate = useNavigate()
-  const signup = useAuthStore((s: any) => s.signup)
-  const fetchMe = useAuthStore((s: any) => s.fetchMe)
-  const isLoading = useAuthStore((s: any) => s.isLoading)
+  const signup = useAuthStore((s) => s.signup)
+  const fetchMe = useAuthStore((s) => s.fetchMe)
+  const isLoading = useAuthStore((s) => s.isLoading)
 
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')

@@ -194,7 +194,7 @@ function UploadModal({
   onUploaded: () => void
 }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const toastError = useToastStore((s: any) => s.error)
+  const toastError = useToastStore((s) => s.error)
   const [label, setLabel] = useState('')
   const [file, setFile] = useState<File | null>(null)
   const [isUploading, setIsUploading] = useState(false)
@@ -322,7 +322,7 @@ function EnhancementModal({
   onClose: () => void
   onApplied: () => void
 }) {
-  const toastError = useToastStore((s: any) => s.error)
+  const toastError = useToastStore((s) => s.error)
   const [questions, setQuestions] = useState<Question[]>([])
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const [isLoading, setIsLoading] = useState(false)
@@ -553,13 +553,13 @@ function CVCard({
 }
 
 export default function CVsPage() {
-  const cvs = useCVsStore((s: any) => s.cvs) as CV[]
-  const isLoading = useCVsStore((s: any) => s.isLoading)
-  const fetchCVs = useCVsStore((s: any) => s.fetchCVs)
-  const deleteCV = useCVsStore((s: any) => s.deleteCV)
-  const confirm = useDialogStore((s: any) => s.confirm)
-  const toastSuccess = useToastStore((s: any) => s.success)
-  const toastError = useToastStore((s: any) => s.error)
+  const cvs = useCVsStore((s) => s.cvs) as CV[]
+  const isLoading = useCVsStore((s) => s.isLoading)
+  const fetchCVs = useCVsStore((s) => s.fetchCVs)
+  const deleteCV = useCVsStore((s) => s.deleteCV)
+  const confirm = useDialogStore((s) => s.confirm)
+  const toastSuccess = useToastStore((s) => s.success)
+  const toastError = useToastStore((s) => s.error)
   const [feedbackCv, setFeedbackCv] = useState<CV | null>(null)
   const [enhancementCv, setEnhancementCv] = useState<CV | null>(null)
   const [isUploadOpen, setIsUploadOpen] = useState(false)

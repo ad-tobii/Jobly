@@ -207,7 +207,7 @@ function AddJobModal({
   onClose: () => void
   onCreated: (jobId?: string) => void
 }) {
-  const toastError = useToastStore((s: any) => s.error)
+  const toastError = useToastStore((s) => s.error)
   const [mode, setMode] = useState<AddMode>('url')
   const [url, setUrl] = useState('')
   const [rawText, setRawText] = useState('')
@@ -329,8 +329,8 @@ function AddJobModal({
 }
 
 export default function DashboardPage() {
-  const toastSuccess = useToastStore((s: any) => s.success)
-  const toastError = useToastStore((s: any) => s.error)
+  const toastSuccess = useToastStore((s) => s.success)
+  const toastError = useToastStore((s) => s.error)
   const [timeline, setTimeline] = useState<Timeline>('weekly')
   const [activeTab, setActiveTab] = useState<TabKey>('all')
   const [data, setData] = useState<DashboardData>(emptyData)

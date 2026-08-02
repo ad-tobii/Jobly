@@ -2,6 +2,7 @@ import { Worker } from 'bullmq';
 import redis from '../config/redis.js';
 import supabase from '../config/supabase.js';
 import puppeteer from 'puppeteer-core';
+import { existsSync } from 'node:fs';
 
 // ── Fireworks AI Helper ───────────────────────────────────────────────────────
 async function callFireworks(messages, options = {}) {
@@ -159,23 +160,48 @@ Return JSON only:
   }
 }
 
+// ── HTML escaping ─────────────────────────────────────────────────────────────
+// Model output and user profile fields land directly in the PDF templates, so
+// anything with an angle bracket or ampersand would silently break the layout.
+const ESCAPE_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+
+function esc(value) {
+  if (value === null || value === undefined) return '';
+  return String(value).replace(/[&<>"']/g, (char) => ESCAPE_MAP[char]);
+}
+
+const escList = (values) => (values || []).map(esc);
+
+// ── Build the contact block from the user's profile ───────────────────────────
+function buildContactLines(profile) {
+  const place = [profile?.city, profile?.country].filter(Boolean).map(esc).join(', ');
+  const reach = [profile?.email, profile?.phone].filter(Boolean).map(esc);
+  const linkedin = profile?.linkedin_url ? esc(profile.linkedin_url) : '';
+
+  const lines = [];
+  if (place) lines.push(place);
+  if (reach.length) lines.push(reach.join('&nbsp;&nbsp;•&nbsp;&nbsp;'));
+  if (linkedin) lines.push(linkedin);
+  return lines;
+}
+
 // ── Build CV HTML ─────────────────────────────────────────────────────────────
-function buildCVHTML(cv) {
+function buildCVHTML(cv, profile = {}, jobRecord = {}) {
   const skillsHTML = cv.skills ? `
     <section>
       <h2>Skills</h2>
       <div class="skills-container">
         ${cv.skills.technical?.length ? `
         <div class="skill-row">
-          <span class="skill-label">Technical</span><div class="leader"></div><span class="skill-value">${cv.skills.technical.join(', ')}</span>
+          <span class="skill-label">Technical</span><div class="leader"></div><span class="skill-value">${escList(cv.skills.technical).join(', ')}</span>
         </div>` : ''}
         ${cv.skills.tools?.length ? `
         <div class="skill-row">
-          <span class="skill-label">Tools</span><div class="leader"></div><span class="skill-value">${cv.skills.tools.join(', ')}</span>
+          <span class="skill-label">Tools</span><div class="leader"></div><span class="skill-value">${escList(cv.skills.tools).join(', ')}</span>
         </div>` : ''}
         ${cv.skills.soft?.length ? `
         <div class="skill-row">
-          <span class="skill-label">Soft Skills</span><div class="leader"></div><span class="skill-value">${cv.skills.soft.join(', ')}</span>
+          <span class="skill-label">Soft Skills</span><div class="leader"></div><span class="skill-value">${escList(cv.skills.soft).join(', ')}</span>
         </div>` : ''}
       </div>
     </section>` : '';
@@ -186,12 +212,12 @@ function buildCVHTML(cv) {
       ${cv.work_experience.map((role) => `
         <div class="entry">
           <div class="entry-header">
-            <div class="title-company">❖ <strong>${role.title || ''}</strong>${role.company ? `, ${role.company}` : ''}</div>
+            <div class="title-company">❖ <strong>${esc(role.title)}</strong>${role.company ? `, ${esc(role.company)}` : ''}</div>
             <div class="leader"></div>
-            <div class="date">${role.dates || ''}</div>
+            <div class="date">${esc(role.dates)}</div>
           </div>
           <ul>
-            ${(role.bullets || []).map((b) => `<li>${b}</li>`).join('')}
+            ${(role.bullets || []).map((b) => `<li>${esc(b)}</li>`).join('')}
           </ul>
         </div>
       `).join('')}
@@ -203,13 +229,13 @@ function buildCVHTML(cv) {
       ${cv.projects.map((p) => `
         <div class="entry">
           <div class="entry-header">
-            <div class="title-company">❖ <strong>${p.name || ''}</strong>${p.tech_stack?.length ? ` | ${p.tech_stack.join(', ')}` : ''}</div>
+            <div class="title-company">❖ <strong>${esc(p.name)}</strong>${p.tech_stack?.length ? ` | ${escList(p.tech_stack).join(', ')}` : ''}</div>
             <div class="leader"></div>
             <div class="date"></div>
           </div>
-          ${p.description ? `<p class="project-desc">${p.description}</p>` : ''}
+          ${p.description ? `<p class="project-desc">${esc(p.description)}</p>` : ''}
           <ul>
-            ${(p.bullets || []).map((b) => `<li>${b}</li>`).join('')}
+            ${(p.bullets || []).map((b) => `<li>${esc(b)}</li>`).join('')}
           </ul>
         </div>
       `).join('')}
@@ -221,17 +247,29 @@ function buildCVHTML(cv) {
       ${cv.education.map((edu) => `
         <div class="entry">
           <div class="entry-header">
-            <div class="title-company">❖ <strong>${edu.institution || ''}</strong></div>
+            <div class="title-company">❖ <strong>${esc(edu.institution)}</strong></div>
             <div class="leader"></div>
-            <div class="date">${edu.dates || ''}</div>
+            <div class="date">${esc(edu.dates)}</div>
           </div>
           <div class="degree-line">
-            <em>${edu.degree || ''}</em>
+            <em>${esc(edu.degree)}</em>
           </div>
-          ${edu.highlights?.length ? `<ul>${edu.highlights.map((h) => `<li>${h}</li>`).join('')}</ul>` : ''}
+          ${edu.highlights?.length ? `<ul>${edu.highlights.map((h) => `<li>${esc(h)}</li>`).join('')}</ul>` : ''}
         </div>
       `).join('')}
     </section>` : '';
+
+  const candidateName = cv.candidate_name || profile?.full_name || 'Candidate';
+  // The tailored CV targets one specific role — lead with that job's title.
+  const professionLine = jobRecord?.title || '';
+  const contactLines = buildContactLines(profile);
+
+  const headerHTML = `
+  <div class="header">
+    <h1>${esc(candidateName)}</h1>
+    ${professionLine ? `<div class="title">${esc(professionLine)}</div>` : ''}
+    ${contactLines.length ? `<div class="contact">${contactLines.join('<br>')}</div>` : ''}
+  </div>`;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -357,18 +395,11 @@ function buildCVHTML(cv) {
   </style>
 </head>
 <body>
-  <div class="header">
-    <h1>${cv.candidate_name || 'Candidate'}</h1>
-    <div class="title">[Job Title / Profession Placeholder]</div>
-    <div class="contact">
-      [Street Address Placeholder], [City Placeholder], [Country Placeholder]<br>
-      [Email Placeholder]&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[Phone Placeholder]
-    </div>
-  </div>
+  ${headerHTML}
   ${cv.professional_summary ? `
   <section class="summary">
     <h2>Summary</h2>
-    <p>${cv.professional_summary}</p>
+    <p>${esc(cv.professional_summary)}</p>
   </section>` : ''}
   ${experienceHTML}
   ${projectsHTML}
@@ -376,16 +407,21 @@ function buildCVHTML(cv) {
   ${skillsHTML}
   ${cv.keywords_injected?.length ? `
   <div class="keywords">
-    Keywords: ${cv.keywords_injected.join(' · ')}
+    Keywords: ${escList(cv.keywords_injected).join(' · ')}
   </div>` : ''}
 </body>
 </html>`;
 }
 
 // ── Build Cover Letter HTML ───────────────────────────────────────────────────
-function buildCoverLetterHTML(coverLetter, candidateName, jobRecord) {
+function buildCoverLetterHTML(coverLetter, candidateName, jobRecord, profile = {}) {
   const date = new Date().toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' });
-  const paragraphs = (coverLetter.body || '').split('\n\n').map((p) => `<p>${p}</p>`).join('');
+  const paragraphs = (coverLetter.body || '')
+    .split('\n\n')
+    .filter((p) => p.trim())
+    .map((p) => `<p>${esc(p)}</p>`)
+    .join('');
+  const contactLines = buildContactLines(profile);
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -408,6 +444,7 @@ function buildCoverLetterHTML(coverLetter, candidateName, jobRecord) {
       margin-bottom: 36px;
     }
     .header h1 { font-size: 20pt; font-weight: 700; color: #0f172a; }
+    .header .contact { margin-top: 8px; font-size: 10pt; color: #374151; line-height: 1.5; }
     .meta { margin-bottom: 28px; font-size: 10.5pt; color: #374151; }
     .meta p { margin-bottom: 2px; }
     .subject { font-weight: 700; font-size: 11pt; color: #0f172a; margin-bottom: 24px; }
@@ -418,28 +455,61 @@ function buildCoverLetterHTML(coverLetter, candidateName, jobRecord) {
 </head>
 <body>
   <div class="header">
-    <h1>${candidateName || 'Candidate'}</h1>
+    <h1>${esc(candidateName || 'Candidate')}</h1>
+    ${contactLines.length ? `<div class="contact">${contactLines.join('<br>')}</div>` : ''}
   </div>
   <div class="meta">
-    <p>${date}</p>
+    <p>${esc(date)}</p>
     <p>Hiring Manager</p>
-    <p>${jobRecord.company || ''}</p>
+    ${jobRecord.company ? `<p>${esc(jobRecord.company)}</p>` : ''}
   </div>
-  <div class="subject">Re: ${coverLetter.subject || `Application for ${jobRecord.title}`}</div>
+  <div class="subject">Re: ${esc(coverLetter.subject || `Application for ${jobRecord.title || 'the advertised role'}`)}</div>
   <div class="body">${paragraphs}</div>
   <div class="sign-off">
     <p>Sincerely,</p>
-    <p class="name">${candidateName || 'Candidate'}</p>
+    <p class="name">${esc(candidateName || 'Candidate')}</p>
   </div>
 </body>
 </html>`;
 }
 
 // ── Render HTML to PDF with Puppeteer ────────────────────────────────────────
+// Resolve a Chrome binary: explicit env var wins, otherwise probe the usual
+// install locations per platform. puppeteer-core ships no browser of its own.
+function resolveChromePath() {
+  if (process.env.PUPPETEER_EXECUTABLE_PATH) return process.env.PUPPETEER_EXECUTABLE_PATH;
+
+  const candidates = {
+    win32: [
+      'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+      'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+    ],
+    darwin: [
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      '/Applications/Chromium.app/Contents/MacOS/Chromium',
+    ],
+    linux: [
+      '/usr/bin/google-chrome-stable',
+      '/usr/bin/google-chrome',
+      '/usr/bin/chromium-browser',
+      '/usr/bin/chromium',
+      '/opt/pw-browsers/chromium',
+    ],
+  }[process.platform] || [];
+
+  const found = candidates.find((candidate) => existsSync(candidate));
+  if (!found) {
+    throw new Error(
+      'No Chrome binary found. Set PUPPETEER_EXECUTABLE_PATH to your Chrome/Chromium install.',
+    );
+  }
+  return found;
+}
+
 async function htmlToPDF(html, margins) {
   const browser = await puppeteer.launch({
     headless: 'new',
-    executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    executablePath: resolveChromePath(),
     args: ['--no-sandbox', '--disable-setuid-sandbox'],
   });
   try {
@@ -474,14 +544,28 @@ const docgenWorker = new Worker(
 
     console.log(`[docgenWorker] Starting docgen for job ${job_id} with CV ${cv_id}`);
 
-    // Step 1: Fetch job + CV
-    const [{ data: jobRecord, error: jobError }, { data: cvRecord, error: cvError }] = await Promise.all([
+    // Step 1: Fetch job + CV + the user's profile (contact details for the letterhead)
+    const [
+      { data: jobRecord, error: jobError },
+      { data: cvRecord, error: cvError },
+      { data: profile, error: profileError },
+    ] = await Promise.all([
       supabase.from('jobs').select('*').eq('id', job_id).single(),
       supabase.from('cvs').select('*').eq('id', cv_id).single(),
+      supabase
+        .from('users')
+        .select('full_name, email, phone, linkedin_url, city, country')
+        .eq('id', user_id)
+        .single(),
     ]);
 
     if (jobError || !jobRecord) throw new Error(`Job ${job_id} not found`);
     if (cvError || !cvRecord) throw new Error(`CV ${cv_id} not found`);
+    // A missing profile shouldn't sink the whole render — the header just degrades.
+    if (profileError) {
+      console.warn(`[docgenWorker] Could not load profile for ${user_id}: ${profileError.message}`);
+    }
+    const userProfile = profile || {};
 
     await supabase.from('jobs').update({ status: 'generating' }).eq('id', job_id);
     const sourceJobDescription = jobRecord.raw_description || jobRecord.description;
@@ -496,8 +580,13 @@ const docgenWorker = new Worker(
     console.log(`[docgenWorker] Cover letter generated`);
 
     // Step 5: Build HTML
-    const cvHTML = buildCVHTML(tailoredCV);
-    const clHTML = buildCoverLetterHTML(coverLetter, tailoredCV.candidate_name || cvRecord.label, jobRecord);
+    const cvHTML = buildCVHTML(tailoredCV, userProfile, jobRecord);
+    const clHTML = buildCoverLetterHTML(
+      coverLetter,
+      tailoredCV.candidate_name || userProfile.full_name || cvRecord.label,
+      jobRecord,
+      userProfile,
+    );
 
     // Step 6: Render PDFs
     console.log(`[docgenWorker] Rendering PDFs...`);
@@ -539,5 +628,8 @@ const docgenWorker = new Worker(
 docgenWorker.on('completed', (job) => console.log(`[docgenWorker] Job ${job.id} done`));
 docgenWorker.on('failed', (job, err) => console.error(`[docgenWorker] Job ${job.id} failed:`, err.message));
 docgenWorker.on('error', (err) => console.error(`[docgenWorker] Worker error:`, err));
+
+// Exported for tests — the worker itself starts on import.
+export { esc, buildContactLines, buildCVHTML, buildCoverLetterHTML, resolveChromePath };
 
 export default docgenWorker;

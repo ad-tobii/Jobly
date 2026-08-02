@@ -52,11 +52,11 @@ const FREQUENCIES: Array<{ value: DigestFrequency; label: string; recommended?: 
 ]
 const TIMEZONES = ['Africa/Lagos', 'UTC', 'Europe/London', 'America/New_York', 'America/Los_Angeles']
 
-function hasCompleteContact(user: any) {
+function hasCompleteContact(user: JoblyUser | null) {
   return Boolean(user?.phone?.trim() && user?.city?.trim() && user?.country?.trim())
 }
 
-function hasUsableCV(cvs: any[]) {
+function hasUsableCV(cvs: Array<Record<string, unknown>>) {
   return cvs.some((cv) => cv.status === 'ready' || (cv.cv_health_score !== null && cv.cv_health_score !== undefined))
 }
 
@@ -243,8 +243,8 @@ function ResultPanel({
 }
 
 function ContactStep({ onContinue }: { onContinue: () => void }) {
-  const updateProfile = useAuthStore((s: any) => s.updateProfile)
-  const user = useAuthStore((s: any) => s.user)
+  const updateProfile = useAuthStore((s) => s.updateProfile)
+  const user = useAuthStore((s) => s.user)
 
   const [phone, setPhone] = useState(user?.phone || '')
   const [city, setCity] = useState(user?.city || '')
@@ -386,9 +386,9 @@ function ContactStep({ onContinue }: { onContinue: () => void }) {
 }
 
 function GmailStep({ onContinue }: { onContinue: () => void }) {
-  const user = useAuthStore((s: any) => s.user)
-  const token = useAuthStore((s: any) => s.token)
-  const fetchMe = useAuthStore((s: any) => s.fetchMe)
+  const user = useAuthStore((s) => s.user)
+  const token = useAuthStore((s) => s.token)
+  const fetchMe = useAuthStore((s) => s.fetchMe)
   const [searchParams, setSearchParams] = useSearchParams()
   const [isConnecting, setIsConnecting] = useState(false)
   const [message, setMessage] = useState('')
@@ -493,8 +493,8 @@ function GmailStep({ onContinue }: { onContinue: () => void }) {
 
 function PreferencesStep() {
   const navigate = useNavigate()
-  const completeOnboarding = useAuthStore((s: any) => s.completeOnboarding)
-  const user = useAuthStore((s: any) => s.user)
+  const completeOnboarding = useAuthStore((s) => s.completeOnboarding)
+  const user = useAuthStore((s) => s.user)
   const existingPreferences = user?.preferences || {}
   const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
   const defaultTimezone = existingPreferences.timezone || (TIMEZONES.includes(browserTimezone) ? browserTimezone : 'Africa/Lagos')
@@ -618,7 +618,7 @@ function PreferencesStep() {
 
 export default function OnboardingPage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const fetchMe = useAuthStore((s: any) => s.fetchMe)
+  const fetchMe = useAuthStore((s) => s.fetchMe)
   const [activeStep, setActiveStep] = useState(0)
   const [isResolvingStep, setIsResolvingStep] = useState(true)
   const [mode, setMode] = useState<Mode>('file')

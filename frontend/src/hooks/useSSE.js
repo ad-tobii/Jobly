@@ -62,7 +62,6 @@ export function useSSE(url, terminalStates = []) {
       esRef.current = null
       setIsConnected(false)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url])
 
   return { status, data, error, isConnected }

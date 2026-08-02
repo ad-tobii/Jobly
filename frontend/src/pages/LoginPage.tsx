@@ -20,9 +20,9 @@ function friendlyLoginError(error: string) {
 
 export default function LoginPage() {
   const navigate = useNavigate()
-  const login = useAuthStore((s: any) => s.login)
-  const fetchMe = useAuthStore((s: any) => s.fetchMe)
-  const isLoading = useAuthStore((s: any) => s.isLoading)
+  const login = useAuthStore((s) => s.login)
+  const fetchMe = useAuthStore((s) => s.fetchMe)
+  const isLoading = useAuthStore((s) => s.isLoading)
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')

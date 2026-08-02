@@ -277,8 +277,8 @@ function LowMatchWarning({
 export default function JobDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const toastSuccess = useToastStore((s: any) => s.success)
-  const toastError = useToastStore((s: any) => s.error)
+  const toastSuccess = useToastStore((s) => s.success)
+  const toastError = useToastStore((s) => s.error)
   const [job, setJob] = useState<Job | null>(null)
   const [cvs, setCvs] = useState<CV[]>([])
   const [selectedCvId, setSelectedCvId] = useState<string | null>(null)
