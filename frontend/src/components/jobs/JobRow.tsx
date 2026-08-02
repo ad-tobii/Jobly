@@ -43,7 +43,7 @@ function StatusCell({ job }: { job: JobLike }) {
 
   if (isScoring(job)) {
     return (
-      <div className="w-[150px]">
+      <div className="w-full sm:w-[150px]">
         <div className="flex items-center justify-between text-[11px] font-medium text-info">
           <span className="flex items-center gap-1.5">
             <span className="h-1.5 w-1.5 rounded-full bg-info animate-pulse-dot" />
@@ -89,10 +89,12 @@ function StatusCell({ job }: { job: JobLike }) {
 
 export default function JobRow({ job, onDelete }: { job: JobLike; onDelete?: (job: JobLike) => void }) {
   return (
-    <div className="group grid grid-cols-[1fr_auto] items-center gap-4 border-b border-border-faint px-4 py-3 transition-colors duration-[120ms] last:border-b-0 hover:bg-app/60">
+    // Below `sm` the row stacks: a 150px status cell alongside the title would
+    // squeeze it down to a few characters on a phone.
+    <div className="group flex flex-col gap-2.5 border-b border-border-faint px-4 py-3 transition-colors duration-[120ms] last:border-b-0 hover:bg-app/60 sm:grid sm:grid-cols-[1fr_auto] sm:items-center sm:gap-4">
       <Link
         to={`/jobs/${job.id}`}
-        className="flex min-w-0 items-center gap-3.5 no-underline outline-none focus-visible:ring-2 focus-visible:ring-accent-muted rounded-md"
+        className="flex min-w-0 items-center gap-3.5 rounded-md no-underline outline-none focus-visible:ring-2 focus-visible:ring-accent-muted"
       >
         <JobLogo job={job} />
         <div className="min-w-0">
@@ -104,9 +106,11 @@ export default function JobRow({ job, onDelete }: { job: JobLike; onDelete?: (jo
         </div>
       </Link>
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 pl-[50px] sm:pl-0">
         <StatusCell job={job} />
 
+        {/* Row actions reveal on hover for pointer users, but stay visible on
+            touch screens where there is no hover state to trigger them. */}
         {job.source_url && (
           <a
             href={job.source_url}
@@ -114,7 +118,7 @@ export default function JobRow({ job, onDelete }: { job: JobLike; onDelete?: (jo
             rel="noreferrer"
             aria-label="Open original posting"
             title="Open original posting"
-            className="hidden h-8 w-8 items-center justify-center rounded-md text-tertiary opacity-0 transition-all duration-[120ms] hover:bg-overlay hover:text-primary focus-visible:opacity-100 group-hover:opacity-100 sm:flex"
+            className="flex h-8 w-8 items-center justify-center rounded-md text-tertiary transition-all duration-[120ms] hover:bg-overlay hover:text-primary focus-visible:opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
           >
             <ExternalLink size={15} />
           </a>
@@ -126,7 +130,7 @@ export default function JobRow({ job, onDelete }: { job: JobLike; onDelete?: (jo
             onClick={() => onDelete(job)}
             aria-label={`Delete ${formatJobTitle(job)}`}
             title="Delete job"
-            className="flex h-8 w-8 items-center justify-center rounded-md text-tertiary opacity-0 transition-all duration-[120ms] hover:bg-overlay hover:text-error focus-visible:opacity-100 group-hover:opacity-100"
+            className="flex h-8 w-8 items-center justify-center rounded-md text-tertiary transition-all duration-[120ms] hover:bg-overlay hover:text-error focus-visible:opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
           >
             <Trash2 size={15} />
           </button>

@@ -51,7 +51,7 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="min-h-screen bg-app text-primary flex items-start justify-center px-4 pt-2 sm:pt-6">
+    <main className="flex min-h-screen items-center justify-center bg-app px-4 py-10 text-primary">
       <section className="w-full max-w-[386px] bg-surface border border-border-faint rounded-lg px-10 py-9 animate-fade-in">
         <div className="flex items-center justify-center">
           <img src="/Jobly-logo.png" alt="Jobly" className="h-7 w-7 object-contain" />

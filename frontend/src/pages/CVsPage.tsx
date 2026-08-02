@@ -18,6 +18,10 @@ import useSSE from '../hooks/useSSE.js'
 import useCVsStore from '../store/cvsStore.js'
 import useDialogStore from '../store/dialogStore.js'
 import useToastStore from '../store/toastStore.js'
+import Button from '../components/ui/Button.tsx'
+import EmptyState from '../components/ui/EmptyState.tsx'
+import PageHeader from '../components/ui/PageHeader.tsx'
+import Skeleton from '../components/ui/Skeleton.tsx'
 
 type CV = {
   id: string
@@ -613,23 +617,37 @@ export default function CVsPage() {
         <CVStreamListener key={cv.id} cvId={cv.id} onUpdate={loadCVs} />
       ))}
 
-      <header className="flex h-14 items-center justify-between border-b border-border-faint px-7">
-        <h1 className="text-[20px] font-semibold text-primary">My CVs</h1>
-        <button
-          type="button"
-          onClick={() => setIsUploadOpen(true)}
-          className="flex h-10 items-center gap-2 rounded-md bg-accent px-4 text-[13px] font-semibold text-white hover:bg-accent-hover"
-        >
-          <Plus size={15} />
-          Upload New CV
-        </button>
-      </header>
+      <PageHeader
+        title="My CVs"
+        subtitle={
+          isLoading
+            ? 'Loading your CVs…'
+            : `${cvs.length} CV${cvs.length === 1 ? '' : 's'} · every job is scored against the active ones`
+        }
+        actions={
+          <Button onClick={() => setIsUploadOpen(true)}>
+            <Plus size={15} />
+            Upload CV
+          </Button>
+        }
+      />
 
-      <main className="w-full max-w-[940px] px-7 py-6">
+      <main className="px-5 py-6 sm:px-7">
         {isLoading && (
-          <div className="flex h-44 items-center justify-center gap-2 rounded-lg border border-border-faint bg-surface text-secondary">
-            <Loader2 size={18} className="animate-spin text-accent" />
-            Loading CVs...
+          <div className="grid gap-4">
+            {Array.from({ length: 3 }).map((_, index) => (
+              <div key={index} className="rounded-lg border border-border-faint bg-surface p-5">
+                <div className="flex items-start gap-3.5">
+                  <Skeleton width="w-10" height="h-10" />
+                  <div className="flex-1">
+                    <Skeleton width="w-1/3" height="h-4" />
+                    <Skeleton width="w-1/4" height="h-3" className="mt-2.5" />
+                  </div>
+                  <Skeleton width="w-20" height="h-6" />
+                </div>
+                <Skeleton width="w-full" height="h-3" className="mt-5" />
+              </div>
+            ))}
           </div>
         )}
 
@@ -641,18 +659,18 @@ export default function CVsPage() {
         )}
 
         {!isLoading && !pageError && cvs.length === 0 && (
-          <div className="flex h-64 flex-col items-center justify-center rounded-lg border border-border-faint bg-surface px-5 text-center">
-            <FileText size={28} className="text-tertiary" />
-            <p className="mt-4 text-[15px] font-semibold text-primary">No CVs yet</p>
-            <p className="mt-1 text-[13px] text-secondary">Upload a PDF CV to start matching against jobs.</p>
-            <button
-              type="button"
-              onClick={() => setIsUploadOpen(true)}
-              className="mt-5 flex h-10 items-center gap-2 rounded-md bg-accent px-4 text-[13px] font-semibold text-white hover:bg-accent-hover"
-            >
-              <Plus size={15} />
-              Upload New CV
-            </button>
+          <div className="rounded-lg border border-border-faint bg-surface">
+            <EmptyState
+              Icon={FileText}
+              title="No CVs yet"
+              description="Upload a PDF or paste your CV text. Jobly scores every job you add against the CVs you keep active."
+              action={
+                <Button onClick={() => setIsUploadOpen(true)}>
+                  <Plus size={15} />
+                  Upload your first CV
+                </Button>
+              }
+            />
           </div>
         )}
 

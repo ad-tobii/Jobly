@@ -8,7 +8,6 @@ import {
   ExternalLink,
   FileText,
   Loader2,
-  Save,
   Sparkles,
   X,
   XCircle,
@@ -18,6 +17,7 @@ import * as cvsApi from '../api/cvs.js'
 import * as jobsApi from '../api/jobs.js'
 import useSSE from '../hooks/useSSE.js'
 import useToastStore from '../store/toastStore.js'
+import Skeleton from '../components/ui/Skeleton.tsx'
 
 type CV = {
   id: string
@@ -143,8 +143,20 @@ function scoreTone(score?: number | null) {
   return { text: 'text-error', bg: 'bg-error' }
 }
 
+const STATUS_LABELS: Record<string, string> = {
+  scraping: 'Scraping',
+  scraped: 'Scraped',
+  scoring: 'Scoring',
+  generating: 'Generating',
+  recommended: 'Recommended',
+  ready: 'Ready',
+  applied: 'Applied',
+  low_match: 'Low match',
+  failed: 'Failed',
+}
+
 function statusLabel(status: string) {
-  return status.replace(/_/g, ' ')
+  return STATUS_LABELS[status] || status.replace(/_/g, ' ')
 }
 
 function DocumentLink({ href, label }: { href?: string | null; label: string }) {
@@ -387,9 +399,35 @@ export default function JobDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-app text-secondary">
-        <Loader2 size={18} className="mr-2 animate-spin text-accent" />
-        Loading job...
+      <div className="min-h-screen bg-app">
+        <header className="border-b border-border-faint px-5 py-5 sm:px-7">
+          <Skeleton width="w-16" height="h-4" />
+          <div className="mt-5 flex items-start gap-4">
+            <Skeleton width="w-10" height="h-10" />
+            <div className="flex-1">
+              <Skeleton width="w-2/5" height="h-6" />
+              <Skeleton width="w-1/3" height="h-3.5" className="mt-2.5" />
+            </div>
+          </div>
+        </header>
+        <div className="grid gap-8 px-5 py-7 sm:px-7 xl:grid-cols-[minmax(0,1fr)_420px]">
+          <div className="rounded-lg border border-border-faint bg-surface p-6">
+            <Skeleton width="w-1/3" height="h-5" />
+            <div className="mt-5 grid gap-2.5">
+              {Array.from({ length: 6 }).map((_, index) => (
+                <Skeleton key={index} width={index % 3 === 2 ? 'w-3/4' : 'w-full'} height="h-3.5" />
+              ))}
+            </div>
+          </div>
+          <div className="rounded-lg border border-border-faint bg-surface p-6">
+            <Skeleton width="w-1/2" height="h-5" />
+            <div className="mt-5 grid gap-3">
+              {Array.from({ length: 3 }).map((_, index) => (
+                <Skeleton key={index} width="w-full" height="h-[72px]" />
+              ))}
+            </div>
+          </div>
+        </div>
       </div>
     )
   }
@@ -408,7 +446,7 @@ export default function JobDetailPage() {
 
   return (
     <div className="min-h-screen bg-app text-primary">
-      <header className="border-b border-border-faint bg-app px-7 py-5">
+      <header className="border-b border-border-faint bg-app px-5 py-5 sm:px-7">
         <button onClick={() => navigate(-1)} className="flex items-center gap-2 text-[13px] text-secondary hover:text-primary">
           <ArrowLeft size={14} />
           Back
@@ -430,17 +468,19 @@ export default function JobDetailPage() {
                 <span className="rounded-sm bg-overlay px-2.5 py-1 text-[11px] font-medium text-secondary">{statusLabel(job.status)}</span>
               </div>
               <p className="mt-1 text-[13px] text-secondary">
-                {job.company || 'Unknown company'} {job.location ? `- ${job.location}` : ''} - Added {relativeAge(job.created_at)}
-                {job.source_type ? ` - via ${job.source_type === 'url' ? 'LinkedIn' : 'Paste'}` : ''}
+                {[
+                  job.company || 'Unknown company',
+                  job.location,
+                  `Added ${relativeAge(job.created_at)}`,
+                  job.source_type ? `via ${job.source_type === 'url' ? 'LinkedIn' : 'paste'}` : null,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
               </p>
             </div>
           </div>
 
           <div className="flex flex-wrap gap-3">
-            <button type="button" onClick={() => toastSuccess('Saved')} className="flex h-10 items-center gap-2 rounded-md border border-border-default bg-surface px-4 text-[13px] font-medium text-secondary hover:bg-overlay hover:text-primary">
-              <Save size={14} />
-              Save
-            </button>
             {job.source_url && (
               <a href={job.source_url} target="_blank" rel="noreferrer" className="flex h-10 items-center gap-2 rounded-md bg-accent px-4 text-[13px] font-medium text-white no-underline hover:bg-accent-hover">
                 Apply on LinkedIn
@@ -451,8 +491,8 @@ export default function JobDetailPage() {
         </div>
       </header>
 
-      <main className="grid gap-8 px-7 py-7 xl:grid-cols-[minmax(0,1fr)_420px]">
-        <section className="rounded-lg border border-border-faint bg-surface p-7">
+      <main className="grid gap-6 px-5 py-6 sm:px-7 xl:grid-cols-[minmax(0,1fr)_420px]">
+        <section className="rounded-lg border border-border-faint bg-surface p-5 sm:p-7">
           <h2 className="border-b border-border-default pb-3 text-[18px] font-semibold text-primary">About the Role</h2>
           <div className="mt-5 grid gap-4 text-[14px] leading-relaxed text-secondary">
             {description.about.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}
@@ -464,7 +504,7 @@ export default function JobDetailPage() {
               <ul className="mt-4 grid gap-3 text-[14px] text-secondary">
                 {description.responsibilities.map((item) => (
                   <li key={item} className="flex gap-3">
-                    <span className="text-tertiary">&gt;</span>
+                    <span className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-tertiary" />
                     <span>{item}</span>
                   </li>
                 ))}
@@ -478,7 +518,7 @@ export default function JobDetailPage() {
               <ul className="mt-4 grid gap-3 text-[14px] text-secondary">
                 {description.requirements.map((item) => (
                   <li key={item} className="flex gap-3">
-                    <span className="text-tertiary">&gt;</span>
+                    <span className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-tertiary" />
                     <span>{item}</span>
                   </li>
                 ))}

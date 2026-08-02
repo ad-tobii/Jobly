@@ -1,8 +1,18 @@
 import Groq from 'groq-sdk';
 
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+// Constructed on first use, not at import time: the SDK throws when the key is
+// absent, which would make this module unimportable (and untestable) without a
+// fully populated environment.
+let groqClient = null;
 
-function parseJson(raw) {
+function getGroq() {
+  if (!groqClient) {
+    groqClient = new Groq({ apiKey: process.env.GROQ_API_KEY });
+  }
+  return groqClient;
+}
+
+export function parseJson(raw) {
   try {
     return JSON.parse(raw);
   } catch {
@@ -12,7 +22,7 @@ function parseJson(raw) {
   }
 }
 
-function normalizeStringArray(value) {
+export function normalizeStringArray(value) {
   return Array.isArray(value)
     ? value.map((item) => String(item || '').trim()).filter(Boolean)
     : [];
@@ -29,7 +39,7 @@ export async function formatJobForRendering({ title, company, location, descript
   }
 
   try {
-    const chat = await groq.chat.completions.create({
+    const chat = await getGroq().chat.completions.create({
       model: 'llama-3.3-70b-versatile',
       response_format: { type: 'json_object' },
       messages: [
