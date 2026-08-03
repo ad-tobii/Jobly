@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Briefcase, Check, ChevronDown, Filter, Plus, Send, Sparkles, Target } from 'lucide-react'
-import * as jobsApi from '../api/jobs.js'
 import useSSE from '../hooks/useSSE.js'
+import { useDashboard, useDeleteJob } from '../hooks/queries.ts'
 import useToastStore from '../store/toastStore.js'
 import useDialogStore from '../store/dialogStore.js'
 import Button from '../components/ui/Button.tsx'
@@ -138,38 +138,19 @@ export default function DashboardPage() {
 
   const [timeline, setTimeline] = useState<Timeline>('weekly')
   const [activeTab, setActiveTab] = useState<TabKey>('all')
-  const [data, setData] = useState<DashboardData>(emptyData)
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState('')
   const [isFilterOpen, setIsFilterOpen] = useState(false)
   const [isAddOpen, setIsAddOpen] = useState(false)
 
   const selectedTimeline = TIMELINES.find((item) => item.value === timeline) || TIMELINES[1]
 
-  const loadDashboard = useCallback(
-    async ({ quiet = false } = {}) => {
-      if (!quiet) setIsLoading(true)
-      const response = await jobsApi.getDashboard({ timeline })
-      setIsLoading(false)
+  const { data: dashboard, isPending, error, refetch } = useDashboard<DashboardData>(timeline)
+  const deleteJob = useDeleteJob()
 
-      if (response.error || !response.data) {
-        const message = response.error || 'Unable to load dashboard.'
-        setError(message)
-        if (!quiet) toastError(message)
-        return
-      }
+  const data: DashboardData = dashboard || emptyData
+  const isLoading = isPending
+  const errorMessage = error ? error.message : ''
 
-      setError('')
-      setData(response.data)
-    },
-    [timeline, toastError],
-  )
-
-  useEffect(() => {
-    loadDashboard()
-  }, [loadDashboard])
-
-  const quietRefresh = useCallback(() => loadDashboard({ quiet: true }), [loadDashboard])
+  const quietRefresh = () => refetch()
 
   // Dismiss the timeline menu on any outside click.
   useEffect(() => {
@@ -200,24 +181,19 @@ export default function DashboardPage() {
       body: `"${formatJobTitle(job)}" and its generated documents will be removed. This cannot be undone.`,
       destructive: true,
       onConfirm: async () => {
-        const previous = data.jobs
-        setData((current) => ({ ...current, jobs: current.jobs.filter((item) => item.id !== job.id) }))
-
-        const response = await jobsApi.deleteJob(job.id)
-        if (response.error) {
-          setData((current) => ({ ...current, jobs: previous }))
-          toastError(response.error)
-          return
+        try {
+          await deleteJob.mutateAsync(job.id)
+          toastSuccess('Job deleted')
+        } catch (err) {
+          toastError(err instanceof Error ? err.message : 'Could not delete this job.')
         }
-        toastSuccess('Job deleted')
-        quietRefresh()
       },
     })
   }
 
   const handleCreated = (jobId?: string) => {
     toastSuccess('Job added. Jobly is processing it now.')
-    loadDashboard({ quiet: true })
+    refetch()
     if (jobId) setActiveTab('scoring')
   }
 
@@ -319,20 +295,20 @@ export default function DashboardPage() {
           <div className="mt-4 overflow-hidden rounded-lg border border-border-faint bg-surface">
             {isLoading && <RowSkeleton />}
 
-            {!isLoading && error && (
+            {!isLoading && errorMessage && (
               <EmptyState
                 Icon={Briefcase}
                 title="Couldn't load your dashboard"
-                description={error}
+                description={errorMessage}
                 action={
-                  <Button variant="ghost" onClick={() => loadDashboard()}>
+                  <Button variant="ghost" onClick={() => refetch()}>
                     Try again
                   </Button>
                 }
               />
             )}
 
-            {!isLoading && !error && visibleJobs.length === 0 && (
+            {!isLoading && !errorMessage && visibleJobs.length === 0 && (
               <EmptyState
                 Icon={Briefcase}
                 title={activeTab === 'all' ? 'No jobs yet' : 'Nothing in this view'}
@@ -353,11 +329,11 @@ export default function DashboardPage() {
             )}
 
             {!isLoading &&
-              !error &&
+              !errorMessage &&
               visibleJobs.map((job) => <JobRow key={job.id} job={job} onDelete={handleDelete} />)}
           </div>
 
-          {!isLoading && !error && data.jobs.length > 0 && (
+          {!isLoading && !errorMessage && data.jobs.length > 0 && (
             <div className="mt-4 flex justify-center">
               <Link
                 to="/jobs"

@@ -1,31 +1,34 @@
 import supabase from '../config/supabase.js'
+import { unauthorized } from './respond.js'
 
+/**
+ * Verifies the Supabase access token.
+ *
+ * Accepts `Authorization: Bearer <token>` normally, and falls back to a
+ * `?token=` query parameter for SSE endpoints — EventSource cannot set headers.
+ * The query form is only ever used on the streaming routes.
+ */
 const auth = async (req, res, next) => {
     const authHeader = req.headers.authorization
-    const queryToken = req.query.token
-
-    if ((!authHeader || !authHeader.startsWith('Bearer ')) && !queryToken) {
-        return res.status(401).json({
-            success: false,
-            error: 'No token provided'
-        })
-    }
+    const queryToken = req.query?.token
 
     const token = authHeader?.startsWith('Bearer ')
-        ? authHeader.split(' ')[1]
+        ? authHeader.slice('Bearer '.length).trim()
         : queryToken
 
-    const { data: { user }, error } = await supabase.auth.getUser(token)
+    if (!token) return next(unauthorized('No token provided'))
 
-    if (error || !user) {
-        return res.status(401).json({
-            success: false,
-            error: 'Invalid or expired token'
-        })
+    try {
+        const { data, error } = await supabase.auth.getUser(token)
+        if (error || !data?.user) return next(unauthorized('Invalid or expired token'))
+
+        req.user = data.user
+        // Tie the request log to the user without leaking the token.
+        req.log = req.log?.child({ userId: data.user.id }) ?? req.log
+        next()
+    } catch (err) {
+        next(err)
     }
-
-    req.user = user
-    next()
 }
 
 export default auth

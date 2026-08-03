@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Briefcase, Plus, RefreshCw, Search, SlidersHorizontal, X } from 'lucide-react'
-import * as jobsApi from '../api/jobs.js'
 import useSSE from '../hooks/useSSE.js'
+import { useDeleteJob, useJobs } from '../hooks/queries.ts'
 import useToastStore from '../store/toastStore.js'
 import useDialogStore from '../store/dialogStore.js'
 import Button from '../components/ui/Button.tsx'
@@ -77,45 +77,21 @@ export default function JobsPage() {
   const toastError = useToastStore((s) => s.error)
   const confirm = useDialogStore((s) => s.confirm)
 
-  const [jobs, setJobs] = useState<JobLike[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [isRefreshing, setIsRefreshing] = useState(false)
-  const [error, setError] = useState('')
-  const [isAddOpen, setIsAddOpen] = useState(false)
+  const { data, isPending, isFetching, error, refetch } = useJobs<JobLike>()
+  const deleteJob = useDeleteJob()
 
+  const jobs: JobLike[] = useMemo(() => data ?? [], [data])
+  const isLoading = isPending
+  const isRefreshing = isFetching && !isPending
+  const errorMessage = error ? error.message : ''
+
+  const [isAddOpen, setIsAddOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState<StatusFilter>('all')
   const [minScore, setMinScore] = useState(0)
   const [sort, setSort] = useState<SortKey>('newest')
 
-  const loadJobs = useCallback(
-    async ({ quiet = false } = {}) => {
-      if (quiet) setIsRefreshing(true)
-      else setIsLoading(true)
-
-      const response = await jobsApi.listJobs()
-
-      setIsLoading(false)
-      setIsRefreshing(false)
-
-      if (response.error || !Array.isArray(response.data)) {
-        const message = response.error || 'Unable to load jobs.'
-        setError(message)
-        if (!quiet) toastError(message)
-        return
-      }
-
-      setError('')
-      setJobs(response.data)
-    },
-    [toastError],
-  )
-
-  useEffect(() => {
-    loadJobs()
-  }, [loadJobs])
-
-  const quietRefresh = useCallback(() => loadJobs({ quiet: true }), [loadJobs])
+  const quietRefresh = () => refetch()
 
   const streamingJobIds = useMemo(
     () => jobs.filter((job) => isScoring(job)).map((job) => job.id),
@@ -165,24 +141,19 @@ export default function JobsPage() {
       body: `"${formatJobTitle(job)}" and its generated documents will be removed. This cannot be undone.`,
       destructive: true,
       onConfirm: async () => {
-        // Optimistic removal — put the row back if the request fails.
-        const previous = jobs
-        setJobs((current) => current.filter((item) => item.id !== job.id))
-
-        const response = await jobsApi.deleteJob(job.id)
-        if (response.error) {
-          setJobs(previous)
-          toastError(response.error)
-          return
+        try {
+          await deleteJob.mutateAsync(job.id)
+          toastSuccess('Job deleted')
+        } catch (err) {
+          toastError(err instanceof Error ? err.message : 'Could not delete this job.')
         }
-        toastSuccess('Job deleted')
       },
     })
   }
 
   const handleCreated = () => {
     toastSuccess('Job added. Jobly is processing it now.')
-    loadJobs({ quiet: true })
+    refetch()
     setStatus('all')
   }
 
@@ -299,13 +270,13 @@ export default function JobsPage() {
         <section className="mt-5 overflow-hidden rounded-lg border border-border-faint bg-surface">
           {isLoading && <JobListSkeleton />}
 
-          {!isLoading && error && (
+          {!isLoading && errorMessage && (
             <EmptyState
               Icon={Briefcase}
               title="Couldn't load your jobs"
-              description={error}
+              description={errorMessage}
               action={
-                <Button variant="ghost" onClick={() => loadJobs()}>
+                <Button variant="ghost" onClick={() => refetch()}>
                   <RefreshCw size={14} />
                   Try again
                 </Button>
@@ -314,7 +285,7 @@ export default function JobsPage() {
           )}
 
           {!isLoading &&
-            !error &&
+            !errorMessage &&
             visibleJobs.length === 0 &&
             (hasActiveFilters ? (
               <EmptyState
@@ -342,7 +313,7 @@ export default function JobsPage() {
             ))}
 
           {!isLoading &&
-            !error &&
+            !errorMessage &&
             visibleJobs.map((job) => <JobRow key={job.id} job={job} onDelete={handleDelete} />)}
         </section>
       </main>

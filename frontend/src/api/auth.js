@@ -1,16 +1,7 @@
-import client from './client.js'
+import client, { wrap } from './client.js'
 
 const TOKEN_KEY = 'jobly_token'
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000'
-
-const wrap = async (fn) => {
-  try {
-    const res = await fn()
-    return { data: res.data, error: null }
-  } catch (err) {
-    return { data: null, error: err.response?.data?.error || err.message }
-  }
-}
 
 // POST /auth/signup
 export const signup = (email, password, full_name) =>

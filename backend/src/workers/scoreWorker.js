@@ -2,6 +2,9 @@ import { Worker } from 'bullmq';
 import redis from '../config/redis.js';
 import supabase  from '../config/supabase.js';
 import Groq from 'groq-sdk';
+import { workerLogger } from '../config/logger.js';
+import { onCompleted, onFailed, onWorkerError } from '../utils/workerFailure.js';
+import { isRecommended, jobStatusForScore } from '../utils/scoring.js';
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
@@ -174,7 +177,7 @@ const scoreWorker = new Worker(
       reasoning: m.reasoning,
       gaps: m.gaps,
       summary: m.summary,
-      recommended: m.score >= 80, // >= 80 is recommended
+      recommended: isRecommended(m.score),
     }));
 
     const { error: matchError } = await supabase
@@ -187,7 +190,7 @@ const scoreWorker = new Worker(
     await supabase
       .from('jobs')
       .update({
-        status: topScore >= 70 ? 'recommended' : 'low_match',
+        status: jobStatusForScore(topScore),
       })
       .eq('id', job_id);
 
@@ -204,8 +207,12 @@ const scoreWorker = new Worker(
   }
 );
 
-scoreWorker.on('completed', (job) => console.log(`[scoreWorker] Job ${job.id} done`));
-scoreWorker.on('failed', (job, err) => console.error(`[scoreWorker] Job ${job.id} failed:`, err.message));
-scoreWorker.on('error', (err) => console.error(`[scoreWorker] Worker error:`, err));
+const log = workerLogger('score');
+
+scoreWorker.on('completed', onCompleted(log));
+// Without this a failed scoring run left the job stuck on 'scoring' forever,
+// and the SSE stream never reached a terminal state.
+scoreWorker.on('failed', onFailed({ log, table: 'jobs', idFrom: (data) => data.job_id }));
+scoreWorker.on('error', onWorkerError(log));
 
 export default scoreWorker;

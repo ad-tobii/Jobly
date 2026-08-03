@@ -4,6 +4,9 @@ import supabase from '../config/supabase.js';
 import puppeteer from 'puppeteer-core';
 import { existsSync } from 'node:fs';
 import { buildCVHTML, buildCoverLetterHTML } from '../utils/documentTemplates.js';
+import { uploadToBucket } from '../utils/storage.js';
+import { workerLogger } from '../config/logger.js';
+import { onCompleted, onFailed, onWorkerError } from '../utils/workerFailure.js';
 
 // ── Fireworks AI Helper ───────────────────────────────────────────────────────
 async function callFireworks(messages, options = {}) {
@@ -215,15 +218,9 @@ async function htmlToPDF(html, margins) {
   }
 }
 
-// ── Upload to Supabase storage ────────────────────────────────────────────────
-async function uploadToStorage(buffer, path, contentType) {
-  const { error } = await supabase.storage
-    .from('documents')
-    .upload(path, buffer, { contentType, upsert: true });
-  if (error) throw new Error(`Storage upload failed: ${error.message}`);
-  const { data: { publicUrl } } = supabase.storage.from('documents').getPublicUrl(path);
-  return publicUrl;
-}
+// Storage is private — we persist the object path and mint short-lived signed
+// URLs at read time (see utils/storage.js). Persisting a URL would either be a
+// permanent public link or an expired one.
 
 // ── Worker ────────────────────────────────────────────────────────────────────
 const docgenWorker = new Worker(
@@ -285,11 +282,24 @@ const docgenWorker = new Worker(
     ]);
     console.log(`[docgenWorker] PDFs rendered`);
 
-    // Step 7: Upload to storage
+    // Step 7: Upload to storage. The first path segment is the user id, which
+    // is what the storage RLS policy checks.
     const timestamp = Date.now();
-    const [cvUrl, clUrl] = await Promise.all([
-      uploadToStorage(cvPDF, `${user_id}/${job_id}/tailored-cv-${timestamp}.pdf`, 'application/pdf'),
-      uploadToStorage(clPDF, `${user_id}/${job_id}/cover-letter-${timestamp}.pdf`, 'application/pdf'),
+    const [cvPath, clPath] = await Promise.all([
+      uploadToBucket(
+        'documents',
+        `${user_id}/${job_id}/tailored-cv-${timestamp}.pdf`,
+        cvPDF,
+        'application/pdf',
+        { upsert: true },
+      ),
+      uploadToBucket(
+        'documents',
+        `${user_id}/${job_id}/cover-letter-${timestamp}.pdf`,
+        clPDF,
+        'application/pdf',
+        { upsert: true },
+      ),
     ]);
     console.log(`[docgenWorker] PDFs uploaded`);
 
@@ -297,8 +307,8 @@ const docgenWorker = new Worker(
     const { error: docError } = await supabase.from('documents').upsert({
       job_id,
       user_id,
-      tailored_cv_url: cvUrl,
-      cover_letter_url: clUrl,
+      tailored_cv_path: cvPath,
+      cover_letter_path: clPath,
       generated_at: new Date().toISOString(),
     }, { onConflict: 'job_id,user_id' });
     if (docError) throw new Error(`Documents save failed: ${docError.message}`);
@@ -314,9 +324,12 @@ const docgenWorker = new Worker(
   }
 );
 
-docgenWorker.on('completed', (job) => console.log(`[docgenWorker] Job ${job.id} done`));
-docgenWorker.on('failed', (job, err) => console.error(`[docgenWorker] Job ${job.id} failed:`, err.message));
-docgenWorker.on('error', (err) => console.error(`[docgenWorker] Worker error:`, err));
+const log = workerLogger('docgen');
+
+docgenWorker.on('completed', onCompleted(log));
+// Same as scoring: a failure used to leave the job pinned at 'generating'.
+docgenWorker.on('failed', onFailed({ log, table: 'jobs', idFrom: (data) => data.job_id }));
+docgenWorker.on('error', onWorkerError(log));
 
 // Exported for tests — the worker itself starts on import.
 export { resolveChromePath };

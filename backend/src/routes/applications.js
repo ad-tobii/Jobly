@@ -1,131 +1,88 @@
 import express from 'express';
 import supabase from '../config/supabase.js';
 import auth from '../middleware/auth.js';
+import { asyncHandler, conflict, notFound, ApiError } from '../middleware/respond.js';
+import validate from '../middleware/validate.js';
+import {
+  applicationListQuerySchema,
+  applicationPatchSchema,
+  idParam,
+  jobIdParam,
+} from '../schemas/index.js';
 
 const router = express.Router();
 
-const VALID_STATUSES = ['applied', 'interviewing', 'offer', 'rejected', 'dismissed'];
+// ── POST /applications/:jobId — mark a job as applied ────────────────────────
+router.post(
+  '/:jobId',
+  auth,
+  validate({ params: jobIdParam }),
+  asyncHandler(async (req, res) => {
+    // One RPC so the application insert and the job status update either both
+    // land or neither does. As two separate calls, a failure on the second left
+    // an application attached to a job that still read 'ready'.
+    const { data, error } = await supabase.rpc('create_application', {
+      p_job_id: req.params.jobId,
+      p_user_id: req.user.id,
+    });
 
-// 1. POST /applications/:jobId
-router.post('/:jobId', auth, async (req, res) => {
-  try {
-    const { jobId } = req.params;
-
-    // Check if application already exists
-    const { data: existingApp, error: existingError } = await supabase
-      .from('applications')
-      .select('id')
-      .eq('job_id', jobId)
-      .eq('user_id', req.user.id)
-      .maybeSingle();
-
-    if (existingError) {
-      return res.status(500).json({ error: existingError.message });
-    }
-
-    if (existingApp) {
-      return res.status(409).json({ error: 'Application already exists for this job' });
-    }
-
-    // Insert new application
-    const { data: app, error: insertError } = await supabase
-      .from('applications')
-      .insert({
-        job_id: jobId,
-        user_id: req.user.id,
-        status: 'applied',
-      })
-      .select()
-      .single();
-
-    if (insertError) {
-      return res.status(500).json({ error: insertError.message });
-    }
-
-    // Update jobs table status
-    const { error: jobUpdateError } = await supabase
-      .from('jobs')
-      .update({ status: 'applied' })
-      .eq('id', jobId)
-      .eq('user_id', req.user.id);
-
-    if (jobUpdateError) {
-      return res.status(500).json({ error: jobUpdateError.message });
-    }
-
-    res.status(201).json(app);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// 2. PATCH /applications/:id
-router.patch('/:id', auth, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { status, notes } = req.body;
-
-    const updates = { updated_at: new Date().toISOString() };
-
-    if (status !== undefined) {
-      if (!VALID_STATUSES.includes(status)) {
-        return res.status(400).json({ error: 'Invalid status' });
+    if (error) {
+      if (error.message?.includes('JOB_NOT_FOUND')) throw notFound('Job not found');
+      if (error.message?.includes('ALREADY_APPLIED')) {
+        throw conflict('You have already marked this job as applied.');
       }
-      updates.status = status;
+      throw new ApiError(500, error.message);
     }
 
-    if (notes !== undefined) {
-      updates.notes = notes;
-    }
+    res.ok(data, 201);
+  }),
+);
 
-    const { data: updatedApp, error } = await supabase
+// ── PATCH /applications/:id — update status and/or notes ─────────────────────
+router.patch(
+  '/:id',
+  auth,
+  validate({ params: idParam, body: applicationPatchSchema }),
+  asyncHandler(async (req, res) => {
+    const { status, notes } = req.body;
+    const updates = { updated_at: new Date().toISOString() };
+    if (status !== undefined) updates.status = status;
+    if (notes !== undefined) updates.notes = notes;
+
+    const { data, error } = await supabase
       .from('applications')
       .update(updates)
-      .eq('id', id)
+      .eq('id', req.params.id)
       .eq('user_id', req.user.id)
       .select()
-      .single();
+      .maybeSingle();
 
-    if (error || !updatedApp) {
-      return res.status(404).json({ error: 'Application not found' });
-    }
+    if (error) throw new ApiError(500, error.message);
+    if (!data) throw notFound('Application not found');
 
-    res.json(updatedApp);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+    res.ok(data);
+  }),
+);
 
-// 3. GET /applications
-router.get('/', auth, async (req, res) => {
-  try {
-    const { status } = req.query;
-
+// ── GET /applications ────────────────────────────────────────────────────────
+router.get(
+  '/',
+  auth,
+  validate({ query: applicationListQuerySchema }),
+  asyncHandler(async (req, res) => {
     let query = supabase
       .from('applications')
-      .select(`
-        *,
-        jobs!inner(title, company, location, logo_url, match_score)
-      `)
+      .select('*, jobs!inner(title, company, location, logo_url, match_score)')
       .eq('user_id', req.user.id)
       .order('applied_at', { ascending: false });
 
-    if (status) {
-      query = query.eq('status', status);
-    }
+    if (req.query.status) query = query.eq('status', req.query.status);
 
     const { data, error } = await query;
+    if (error) throw new ApiError(500, error.message);
 
-    if (error) {
-      return res.status(500).json({ error: error.message });
-    }
-
-    // Format the response to embed job details if needed
-    // Assuming Supabase returns a nested 'jobs' object
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+    res.ok(data);
+  }),
+);
 
 export default router;

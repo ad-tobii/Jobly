@@ -96,12 +96,16 @@ and the `match_cv_chunks` signature.
 cd backend
 cp .env.example .env    # then fill it in
 npm install
-npm run dev             # http://localhost:3000
+npm run dev:all         # API on :3000 + workers, in separate processes
 ```
 
-`npm run dev` starts the API and all six workers in one process. Every variable
-in `.env.example` is documented inline; the Gmail and webhook blocks are
-optional.
+The API and the queue workers are **separate processes**. `npm run dev:all`
+runs both; in production run `npm start` and `npm run start:worker` as two
+services, so a Puppeteer crash in a worker can't take the API down and each can
+be scaled independently.
+
+Every variable in `.env.example` is documented inline; the Gmail and webhook
+blocks are optional.
 
 ### 4. Frontend
 
@@ -118,11 +122,14 @@ npm run dev             # http://localhost:5173
 
 **Backend**
 
-| Command         | Does                                     |
-|-----------------|------------------------------------------|
-| `npm run dev`   | API + workers with nodemon reload        |
-| `npm start`     | Same, for process managers               |
-| `npm test`      | Unit tests (`node --test`)               |
+| Command                | Does                                        |
+|------------------------|---------------------------------------------|
+| `npm run dev:all`      | API + workers together, with reload         |
+| `npm run dev`          | API only, with reload                       |
+| `npm run dev:worker`   | Workers only, with reload                   |
+| `npm start`            | API, for process managers                   |
+| `npm run start:worker` | Workers, for process managers               |
+| `npm test`             | Unit tests (`node --test`)                  |
 
 **Frontend**
 
@@ -142,17 +149,21 @@ npm run dev             # http://localhost:5173
 backend/
   db/schema.sql        Full Postgres schema — run this first
   src/
-    config/            Supabase, Redis and Google OAuth clients
-    middleware/        Bearer-token auth (also accepts ?token= for SSE)
-    queues/            BullMQ queue definitions
+    index.js           API entrypoint
+    worker.js          Queue-consumer entrypoint (run separately)
+    config/            Supabase, Redis, Google OAuth, logger
+    middleware/        auth, response envelope, validation, rate limits
+    queues/            BullMQ queues + retry/retention policy
     routes/            auth, cv, jobs, documents, applications, webhooks
+    schemas/           zod request schemas
     workers/           cv, scrape, score, docgen, digest + scheduler
-    utils/             Job description formatting
+    utils/             storage signing, PDF templates, scoring, formatting
 frontend/
   src/
     api/               Axios wrappers — resolve to { data, error }, never throw
     components/        ui/ primitives, jobs/ and applications/ feature parts
     hooks/useSSE.js    Server-sent event subscription
+    hooks/queries.ts   React Query data hooks
     lib/               Shared status vocabulary and formatters
     pages/             One file per route
     store/             zustand stores
@@ -165,10 +176,19 @@ DESIGN.md              Design system — colours, type scale, component specs
 - **Auth.** Supabase issues the JWT; the backend validates it on every request.
   SSE endpoints accept the token as a query parameter because `EventSource`
   cannot set headers.
-- **API responses.** The frontend `api/*` modules never throw — they resolve to
-  `{ data, error }`. A 401 anywhere clears the token and bounces to `/login`.
-- **Workers share the API process.** Fine for a single box. To scale, split the
-  worker imports out of `src/index.js` into their own entrypoint and run them
-  separately.
+- **API responses.** Every endpoint answers with one envelope —
+  `{ success: true, data }` or `{ success: false, error: { message, code } }`.
+  The frontend `api/*` modules unwrap it and never throw, resolving to
+  `{ data, error }`. A 401 outside the login form clears the token and bounces
+  to `/login`.
+- **Storage is private.** Records hold storage *paths*; the API mints
+  short-lived signed URLs on read. Never persist a URL to a document.
+- **Requests are validated** with zod before reaching a handler, and unknown
+  fields are stripped.
+- **Every request carries an id** (`x-request-id`, echoed in the response and
+  in every log line). It's passed to queue jobs as `correlation_id`, so one
+  submission can be traced from the browser through scrape, score and docgen.
+- **Rate limits** protect the endpoints that cost money — job/CV ingestion and
+  anything that calls an LLM.
 - **Design.** `DESIGN.md` is the source of truth for the UI. Tokens are wired
   into Tailwind through `@theme` in `frontend/src/index.css`.

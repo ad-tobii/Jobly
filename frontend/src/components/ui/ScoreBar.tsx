@@ -4,15 +4,17 @@ type ScoreBarProps = {
   className?: string
 }
 
+import { RECOMMEND_THRESHOLD, WEAK_THRESHOLD } from '../../lib/jobs.ts'
+
 function barColor(score: number) {
-  if (score >= 70) return 'bg-success'
-  if (score >= 50) return 'bg-warning'
+  if (score >= RECOMMEND_THRESHOLD) return 'bg-success'
+  if (score >= WEAK_THRESHOLD) return 'bg-warning'
   return 'bg-error'
 }
 
 function labelColor(score: number) {
-  if (score >= 70) return 'text-success'
-  if (score >= 50) return 'text-warning'
+  if (score >= RECOMMEND_THRESHOLD) return 'text-success'
+  if (score >= WEAK_THRESHOLD) return 'text-warning'
   return 'text-error'
 }
 

@@ -3,28 +3,34 @@ import { digestQueue, scrapeQueue } from '../queues/index.js';
 import oauth2Client from '../config/google.js';
 import { google } from 'googleapis';
 import supabase from '../config/supabase.js';
+import { asyncHandler, unauthorized } from '../middleware/respond.js';
+import validate from '../middleware/validate.js';
+import { notifyWebhookSchema } from '../schemas/index.js';
 
 const router = express.Router();
 
-router.post('/notify', async (req, res) => {
-    try {
-        const secret = req.headers['x-webhook-secret'];
-        if (secret !== process.env.WEBHOOK_SECRET) {
-            return res.status(401).json({ error: 'Unauthorized' });
-        }
-        
-        const { user_id } = req.body;
-        if (!user_id) {
-            return res.status(400).json({ error: 'user_id is required' });
-        }
-
-        await digestQueue.add('send-digest', { user_id });
-        res.status(200).json({ message: 'Digest queued' });
-    } catch (err) {
-        console.error('Webhook notify error:', err);
-        res.status(500).json({ error: err.message });
+/**
+ * Checks the shared secret before anything else, so an unauthenticated caller
+ * learns nothing about the expected payload shape. Rejects outright when no
+ * secret is configured — an unset env var must not open the endpoint.
+ */
+function verifyWebhookSecret(req, res, next) {
+    const expected = process.env.WEBHOOK_SECRET;
+    if (!expected || req.headers['x-webhook-secret'] !== expected) {
+        return next(unauthorized('Invalid webhook secret'));
     }
-});
+    next();
+}
+
+router.post(
+    '/notify',
+    verifyWebhookSecret,
+    validate({ body: notifyWebhookSchema }),
+    asyncHandler(async (req, res) => {
+        await digestQueue.add('send-digest', { user_id: req.body.user_id });
+        res.ok({ message: 'Digest queued' });
+    }),
+);
 
 router.post('/gmail', async (req, res) => {
     // 1. No auth middleware — this is called by Google

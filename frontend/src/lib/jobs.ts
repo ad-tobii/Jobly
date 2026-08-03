@@ -50,10 +50,17 @@ export function bestScore(job: JobLike): number | null {
   return fromMatches || null
 }
 
+/**
+ * Score thresholds. Must match backend/src/utils/scoring.js — the backend
+ * decides 'recommended' vs 'low_match' with the same numbers.
+ */
+export const RECOMMEND_THRESHOLD = 70
+export const WEAK_THRESHOLD = 50
+
 export function scoreTone(score?: number | null) {
   if (score === null || score === undefined) return 'neutral' as const
-  if (score >= 70) return 'success' as const
-  if (score >= 50) return 'warning' as const
+  if (score >= RECOMMEND_THRESHOLD) return 'success' as const
+  if (score >= WEAK_THRESHOLD) return 'warning' as const
   return 'error' as const
 }
 

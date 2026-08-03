@@ -13,11 +13,11 @@ const useAuthStore = create((set, get) => ({
   login: async (email, password) => {
     set({ isLoading: true })
     const { data, error } = await authApi.login(email, password)
-    if (error || !data?.data) {
+    if (error || !data?.session) {
       set({ isLoading: false })
       return { error: error || 'Login failed' }
     }
-    const { user, session } = data.data
+    const { user, session } = data
     const token = session.access_token
     localStorage.setItem(TOKEN_KEY, token)
     set({ user, token, isAuthed: true, isLoading: false })
@@ -28,11 +28,11 @@ const useAuthStore = create((set, get) => ({
   signup: async (email, password, full_name) => {
     set({ isLoading: true })
     const { data, error } = await authApi.signup(email, password, full_name)
-    if (error || !data?.data) {
+    if (error || !data?.user) {
       set({ isLoading: false })
       return { error: error || 'Signup failed' }
     }
-    const { user, session } = data.data
+    const { user, session } = data
     const token = session?.access_token
     if (token) {
       localStorage.setItem(TOKEN_KEY, token)
@@ -57,25 +57,25 @@ const useAuthStore = create((set, get) => ({
     if (!token) return
     set({ isLoading: true })
     const { data, error } = await authApi.getMe()
-    if (error || !data?.data) {
+    if (error || !data) {
       set({ isLoading: false })
       return
     }
-    set({ user: data.data, isLoading: false })
+    set({ user: data, isLoading: false })
   },
 
   // ── updateProfile ─────────────────────────────────────────────────────────────
   updateProfile: async (profileData) => {
     const { data, error } = await authApi.updateProfile(profileData)
-    if (error || !data?.data) return { error: error || 'Update failed' }
-    set({ user: data.data })
+    if (error || !data) return { error: error || 'Update failed' }
+    set({ user: data })
     return { error: null }
   },
 
   completeOnboarding: async (preferences) => {
     const { data, error } = await authApi.completeOnboarding(preferences)
-    if (error || !data?.data) return { error: error || 'Onboarding completion failed' }
-    set({ user: data.data })
+    if (error || !data) return { error: error || 'Onboarding completion failed' }
+    set({ user: data })
     return { error: null }
   },
 

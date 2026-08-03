@@ -2,71 +2,80 @@ import express from 'express';
 import supabase from '../config/supabase.js';
 import auth from '../middleware/auth.js';
 import { docgenQueue } from '../queues/index.js';
+import { asyncHandler, badRequest, notFound, ApiError } from '../middleware/respond.js';
+import validate from '../middleware/validate.js';
+import { jobIdParam } from '../schemas/index.js';
+import { generationLimiter } from '../middleware/rateLimit.js';
+import { withSignedDocumentUrls } from '../utils/storage.js';
 
 const router = express.Router();
 
-// 1. GET /documents/:jobId
-router.get('/:jobId', auth, async (req, res) => {
-  try {
+// ── GET /documents/:jobId ────────────────────────────────────────────────────
+router.get(
+  '/:jobId',
+  auth,
+  validate({ params: jobIdParam }),
+  asyncHandler(async (req, res) => {
     const { data, error } = await supabase
       .from('documents')
       .select('*')
       .eq('job_id', req.params.jobId)
       .eq('user_id', req.user.id)
-      .single();
+      .maybeSingle();
 
-    if (error || !data) {
-      return res.status(404).json({ error: 'No documents found for this job' });
-    }
+    if (error) throw new ApiError(500, error.message);
+    if (!data) throw notFound('No documents found for this job');
 
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+    res.ok(await withSignedDocumentUrls(data));
+  }),
+);
 
-// 2. POST /documents/:jobId/generate
-router.post('/:jobId/generate', auth, async (req, res) => {
-  try {
+// ── POST /documents/:jobId/generate ──────────────────────────────────────────
+router.post(
+  '/:jobId/generate',
+  auth,
+  generationLimiter,
+  validate({ params: jobIdParam }),
+  asyncHandler(async (req, res) => {
     const { jobId } = req.params;
 
-    // Fetch the job record to confirm ownership
     const { data: job, error: jobError } = await supabase
       .from('jobs')
-      .select('selected_cv_id')
+      .select('selected_cv_id, status')
       .eq('id', jobId)
       .eq('user_id', req.user.id)
-      .single();
+      .maybeSingle();
 
-    if (jobError || !job) {
-      return res.status(404).json({ error: 'Job not found' });
-    }
+    if (jobError) throw new ApiError(500, jobError.message);
+    if (!job) throw notFound('Job not found');
 
     if (!job.selected_cv_id) {
-      return res.status(400).json({ error: 'No CV selected for this job. Call POST /jobs/:id/select-cv first.' });
+      throw badRequest('Pick a CV for this job before generating documents.');
     }
 
-    // Update job status to 'generating'
+    // Don't queue a second render on top of one already running.
+    if (job.status === 'generating') {
+      return res.ok({ message: 'Document generation is already in progress.' }, 202);
+    }
+
     const { error: updateError } = await supabase
       .from('jobs')
       .update({ status: 'generating' })
-      .eq('id', jobId);
+      .eq('id', jobId)
+      .eq('user_id', req.user.id);
 
-    if (updateError) {
-      return res.status(500).json({ error: updateError.message });
-    }
+    if (updateError) throw new ApiError(500, updateError.message);
 
-    // Queue docgen
     await docgenQueue.add('generate-docs', {
       job_id: jobId,
       cv_id: job.selected_cv_id,
       user_id: req.user.id,
+      correlation_id: req.id,
     });
 
-    res.status(202).json({ message: 'Document generation started.' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+    req.log?.info({ jobId }, 'queued document generation');
+    res.ok({ message: 'Document generation started.' }, 202);
+  }),
+);
 
 export default router;

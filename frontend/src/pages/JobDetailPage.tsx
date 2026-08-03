@@ -13,11 +13,12 @@ import {
   XCircle,
 } from 'lucide-react'
 import * as applicationsApi from '../api/applications.js'
-import * as cvsApi from '../api/cvs.js'
 import * as jobsApi from '../api/jobs.js'
+import { useCVs, useJob } from '../hooks/queries.ts'
 import useSSE from '../hooks/useSSE.js'
 import useToastStore from '../store/toastStore.js'
 import Skeleton from '../components/ui/Skeleton.tsx'
+import { RECOMMEND_THRESHOLD, WEAK_THRESHOLD } from '../lib/jobs.ts'
 
 type CV = {
   id: string
@@ -138,8 +139,8 @@ function splitDescription(description?: string | null, rendered?: RenderDescript
 }
 
 function scoreTone(score?: number | null) {
-  if ((score ?? 0) >= 70) return { text: 'text-success', bg: 'bg-success' }
-  if ((score ?? 0) >= 50) return { text: 'text-warning', bg: 'bg-warning' }
+  if ((score ?? 0) >= RECOMMEND_THRESHOLD) return { text: 'text-success', bg: 'bg-success' }
+  if ((score ?? 0) >= WEAK_THRESHOLD) return { text: 'text-warning', bg: 'bg-warning' }
   return { text: 'text-error', bg: 'bg-error' }
 }
 
@@ -291,52 +292,39 @@ export default function JobDetailPage() {
   const navigate = useNavigate()
   const toastSuccess = useToastStore((s) => s.success)
   const toastError = useToastStore((s) => s.error)
-  const [job, setJob] = useState<Job | null>(null)
-  const [cvs, setCvs] = useState<CV[]>([])
   const [selectedCvId, setSelectedCvId] = useState<string | null>(null)
   const [drawerMatch, setDrawerMatch] = useState<Match | null>(null)
   const [warningMatch, setWarningMatch] = useState<Match | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
   const [isTailoring, setIsTailoring] = useState(false)
   const [isApplying, setIsApplying] = useState(false)
-  const [error, setError] = useState('')
+
+  const jobQuery = useJob<Job>(id)
+  const cvsQuery = useCVs<CV>()
+
+  const job = jobQuery.data ?? null
+  const cvs: CV[] = cvsQuery.data ?? []
+  const isLoading = jobQuery.isPending
+  const error = jobQuery.error ? jobQuery.error.message : ''
+
+  const loadDetail = useCallback(() => {
+    jobQuery.refetch()
+    cvsQuery.refetch()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id])
 
   const stream = useSSE(job && LIVE_STATES.includes(job.status) ? `/jobs/${job.id}/status-stream` : '', TERMINAL_STATES)
 
-  const loadDetail = useCallback(async () => {
-    if (!id) return
-    setIsLoading(true)
-    const [jobResponse, cvsResponse] = await Promise.all([
-      jobsApi.getJob(id),
-      cvsApi.listCVs(),
-    ])
-    setIsLoading(false)
-
-    if (jobResponse.error || !jobResponse.data) {
-      const message = jobResponse.error || 'Unable to load job.'
-      setError(message)
-      toastError(message)
-      return
-    }
-
-    if (cvsResponse.error) toastError(cvsResponse.error)
-
-    const nextJob = jobResponse.data
-    setJob(nextJob)
-    setCvs(Array.isArray(cvsResponse.data) ? cvsResponse.data : [])
+  // Default the CV picker once the job's matches arrive.
+  useEffect(() => {
+    if (!job) return
     setSelectedCvId((current) =>
       current ||
-      nextJob.selected_cv_id ||
-      nextJob.job_cv_matches?.find((match: Match) => match.recommended)?.cv_id ||
-      nextJob.job_cv_matches?.[0]?.cv_id ||
+      job.selected_cv_id ||
+      job.job_cv_matches?.find((match: Match) => match.recommended)?.cv_id ||
+      job.job_cv_matches?.[0]?.cv_id ||
       null
     )
-    setError('')
-  }, [id, toastError])
-
-  useEffect(() => {
-    loadDetail()
-  }, [loadDetail])
+  }, [job])
 
   useEffect(() => {
     if (!stream.data?.status) return
@@ -375,7 +363,7 @@ export default function JobDetailPage() {
   }
 
   const handleTailor = () => {
-    if ((selectedMatch?.score ?? 0) < 70) {
+    if ((selectedMatch?.score ?? 0) < RECOMMEND_THRESHOLD) {
       setWarningMatch(selectedMatch || null)
       return
     }
@@ -461,7 +449,7 @@ export default function JobDetailPage() {
               <div className="flex flex-wrap items-center gap-3">
                 <h1 className="truncate text-[24px] font-semibold text-primary">{job.title || 'Untitled role'}</h1>
                 {!!topScore && (
-                  <span className={`rounded-sm px-2.5 py-1 text-[11px] font-medium ${topScore >= 70 ? 'bg-success-subtle text-success' : topScore >= 50 ? 'bg-warning-subtle text-warning' : 'bg-error-subtle text-error'}`}>
+                  <span className={`rounded-sm px-2.5 py-1 text-[11px] font-medium ${topScore >= RECOMMEND_THRESHOLD ? 'bg-success-subtle text-success' : topScore >= WEAK_THRESHOLD ? 'bg-warning-subtle text-warning' : 'bg-error-subtle text-error'}`}>
                     {topScore}% Match
                   </span>
                 )}

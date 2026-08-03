@@ -4,6 +4,8 @@ import redis from '../config/redis.js';
 import  supabase  from '../config/supabase.js';
 import { scoreQueue } from '../queues/index.js';
 import { formatJobForRendering } from '../utils/jobFormatter.js';
+import { workerLogger } from '../config/logger.js';
+import { onCompleted, onFailed, onWorkerError } from '../utils/workerFailure.js';
 
 const scrapeWorker = new Worker(
   'scrape-queue',
@@ -27,12 +29,9 @@ const scrapeWorker = new Worker(
 
       scraped = response.data.data;
     } catch (err) {
-      // Mark job as failed in Supabase
-      await supabase
-        .from('jobs')
-        .update({ status: 'failed' })
-        .eq('id', job_id);
-
+      // No status write here — the 'failed' handler marks the job failed only
+      // after BullMQ exhausts its retries, so a transient scraper blip doesn't
+      // show the user a permanent failure it's about to recover from.
       throw new Error(`[scrapeWorker] Scrape failed: ${err.message}`);
     }
 
@@ -77,8 +76,10 @@ const scrapeWorker = new Worker(
   }
 );
 
-scrapeWorker.on('completed', (job) => console.log(`[scrapeWorker] Job ${job.id} done`));
-scrapeWorker.on('failed', (job, err) => console.error(`[scrapeWorker] Job ${job.id} failed:`, err.message));
-scrapeWorker.on('error', (err) => console.error(`[scrapeWorker] Worker error:`, err));
+const log = workerLogger('scrape');
+
+scrapeWorker.on('completed', onCompleted(log));
+scrapeWorker.on('failed', onFailed({ log, table: 'jobs', idFrom: (data) => data.job_id }));
+scrapeWorker.on('error', onWorkerError(log));
 
 export default scrapeWorker;

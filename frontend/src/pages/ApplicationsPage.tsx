@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Building2,
@@ -9,8 +9,8 @@ import {
   Search,
   X,
 } from 'lucide-react'
-import * as applicationsApi from '../api/applications.js'
 import useToastStore from '../store/toastStore.js'
+import { useApplications, useUpdateApplication } from '../hooks/queries.ts'
 import Button from '../components/ui/Button.tsx'
 import EmptyState from '../components/ui/EmptyState.tsx'
 import Modal from '../components/ui/Modal.tsx'
@@ -126,42 +126,18 @@ export default function ApplicationsPage() {
   const toastSuccess = useToastStore((s) => s.success)
   const toastError = useToastStore((s) => s.error)
 
-  const [applications, setApplications] = useState<Application[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [isRefreshing, setIsRefreshing] = useState(false)
-  const [error, setError] = useState('')
+  const { data, isPending, isFetching, error, refetch } = useApplications<Application>()
+  const updateApplication = useUpdateApplication()
+
+  const applications: Application[] = useMemo(() => data ?? [], [data])
+  const isLoading = isPending
+  const isRefreshing = isFetching && !isPending
+  const errorMessage = error ? error.message : ''
+
   const [savingId, setSavingId] = useState<string | null>(null)
   const [notesFor, setNotesFor] = useState<Application | null>(null)
-
   const [filter, setFilter] = useState<StatusFilter>('all')
   const [search, setSearch] = useState('')
-
-  const load = useCallback(
-    async ({ quiet = false } = {}) => {
-      if (quiet) setIsRefreshing(true)
-      else setIsLoading(true)
-
-      const response = await applicationsApi.listApplications()
-
-      setIsLoading(false)
-      setIsRefreshing(false)
-
-      if (response.error || !Array.isArray(response.data)) {
-        const message = response.error || 'Unable to load applications.'
-        setError(message)
-        if (!quiet) toastError(message)
-        return
-      }
-
-      setError('')
-      setApplications(response.data)
-    },
-    [toastError],
-  )
-
-  useEffect(() => {
-    load()
-  }, [load])
 
   const counts = useMemo(() => countByStatus(applications), [applications])
   const inPlay = useMemo(() => activeCount(applications), [applications])
@@ -179,36 +155,22 @@ export default function ApplicationsPage() {
     })
   }, [applications, filter, search])
 
-  /** Patch one field of an application, rolling back the row if the API rejects it. */
-  const patchApplication = useCallback(
-    async (id: string, changes: { status?: ApplicationStatus; notes?: string }) => {
-      const previous = applications
-      setSavingId(id)
-      setApplications((current) =>
-        current.map((application) => (application.id === id ? { ...application, ...changes } : application)),
-      )
-
-      const response = await applicationsApi.updateStatus(id, changes.status as string, changes.notes)
-      setSavingId(null)
-
-      if (response.error) {
-        setApplications(previous)
-        toastError(response.error)
-        return false
-      }
-
-      // Take the server's version so updated_at and any coercion are reflected.
-      if (response.data) {
-        setApplications((current) =>
-          current.map((application) =>
-            application.id === id ? { ...application, ...response.data } : application,
-          ),
-        )
-      }
+  /** Patch one field of an application. React Query refetches the list on success. */
+  const patchApplication = async (
+    id: string,
+    changes: { status?: ApplicationStatus; notes?: string },
+  ) => {
+    setSavingId(id)
+    try {
+      await updateApplication.mutateAsync({ id, ...changes })
       return true
-    },
-    [applications, toastError],
-  )
+    } catch (err) {
+      toastError(err instanceof Error ? err.message : 'Could not save that change.')
+      return false
+    } finally {
+      setSavingId(null)
+    }
+  }
 
   const handleStatusChange = async (application: Application, status: ApplicationStatus) => {
     const ok = await patchApplication(application.id, { status })
@@ -235,7 +197,7 @@ export default function ApplicationsPage() {
         actions={
           <Button
             variant="ghost"
-            onClick={() => load({ quiet: true })}
+            onClick={() => refetch()}
             disabled={isRefreshing}
             aria-label="Refresh applications"
             title="Refresh"
@@ -318,13 +280,13 @@ export default function ApplicationsPage() {
         <section className="mt-4 overflow-hidden rounded-lg border border-border-faint bg-surface">
           {isLoading && <ApplicationsSkeleton />}
 
-          {!isLoading && error && (
+          {!isLoading && errorMessage && (
             <EmptyState
               Icon={ClipboardList}
               title="Couldn't load your applications"
-              description={error}
+              description={errorMessage}
               action={
-                <Button variant="ghost" onClick={() => load()}>
+                <Button variant="ghost" onClick={() => refetch()}>
                   <RefreshCw size={14} />
                   Try again
                 </Button>
@@ -333,7 +295,7 @@ export default function ApplicationsPage() {
           )}
 
           {!isLoading &&
-            !error &&
+            !errorMessage &&
             visible.length === 0 &&
             (hasFilters ? (
               <EmptyState
@@ -369,7 +331,7 @@ export default function ApplicationsPage() {
             ))}
 
           {!isLoading &&
-            !error &&
+            !errorMessage &&
             visible.map((application) => (
               <div
                 key={application.id}

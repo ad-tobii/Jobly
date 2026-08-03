@@ -2,6 +2,12 @@ import { Worker } from 'bullmq';
 import axios from 'axios';
 import redis from '../config/redis.js';
 import supabase from '../config/supabase.js';
+import { workerLogger } from '../config/logger.js';
+import { onCompleted, onFailed, onWorkerError } from '../utils/workerFailure.js';
+import { signPaths } from '../utils/storage.js';
+
+// Digest emails sit in an inbox — a one-hour link would be dead on arrival.
+const DIGEST_URL_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 const digestWorker = new Worker(
   'digest-queue',
@@ -22,7 +28,7 @@ const digestWorker = new Worker(
     // 2. Fetch all ready undigested jobs for this user
     const { data: jobs, error: jobsError } = await supabase
       .from('jobs')
-      .select('*, documents(tailored_cv_url, cover_letter_url)')
+      .select('*, documents(tailored_cv_path, cover_letter_path)')
       .eq('user_id', user_id)
       .eq('status', 'ready')
       .eq('digest_sent', false);
@@ -36,7 +42,14 @@ const digestWorker = new Worker(
       return;
     }
 
-    // 3. Build n8n payload
+    // 3. Build n8n payload. The digest email is read hours later, so sign the
+    // document links for long enough to still work when it's opened.
+    const docPaths = jobs.flatMap((j) => [
+      j.documents?.[0]?.tailored_cv_path,
+      j.documents?.[0]?.cover_letter_path,
+    ]);
+    const signed = await signPaths('documents', docPaths, DIGEST_URL_TTL_SECONDS);
+
     const payload = {
       user_email: user.email,
       user_name: user.full_name,
@@ -47,8 +60,8 @@ const digestWorker = new Worker(
         company: j.company,
         location: j.location,
         match_score: j.match_score,
-        tailored_cv_url: j.documents?.[0]?.tailored_cv_url || null,
-        cover_letter_url: j.documents?.[0]?.cover_letter_url || null,
+        tailored_cv_url: signed[j.documents?.[0]?.tailored_cv_path] || null,
+        cover_letter_url: signed[j.documents?.[0]?.cover_letter_path] || null,
       })),
     };
 
@@ -98,12 +111,11 @@ const digestWorker = new Worker(
   }
 );
 
-digestWorker.on('failed', (job, err) => {
-  console.error(`[digestWorker] Job ${job?.id} failed:`, err.message);
-});
+const log = workerLogger('digest');
 
-digestWorker.on('error', (err) => {
-  console.error(`[digestWorker] Worker error:`, err);
-});
+digestWorker.on('completed', onCompleted(log));
+// A digest owns no database record to mark, so just log the failure.
+digestWorker.on('failed', onFailed({ log, table: null, idFrom: () => undefined }));
+digestWorker.on('error', onWorkerError(log));
 
 export default digestWorker;

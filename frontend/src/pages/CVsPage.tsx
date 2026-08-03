@@ -14,8 +14,9 @@ import {
   XCircle,
 } from 'lucide-react'
 import * as cvsApi from '../api/cvs.js'
+import { useCVs, queryKeys } from '../hooks/queries.ts'
+import { useQueryClient } from '@tanstack/react-query'
 import useSSE from '../hooks/useSSE.js'
-import useCVsStore from '../store/cvsStore.js'
 import useDialogStore from '../store/dialogStore.js'
 import useToastStore from '../store/toastStore.js'
 import Button from '../components/ui/Button.tsx'
@@ -557,31 +558,23 @@ function CVCard({
 }
 
 export default function CVsPage() {
-  const cvs = useCVsStore((s) => s.cvs) as CV[]
-  const isLoading = useCVsStore((s) => s.isLoading)
-  const fetchCVs = useCVsStore((s) => s.fetchCVs)
-  const deleteCV = useCVsStore((s) => s.deleteCV)
   const confirm = useDialogStore((s) => s.confirm)
   const toastSuccess = useToastStore((s) => s.success)
   const toastError = useToastStore((s) => s.error)
+  const queryClient = useQueryClient()
+
+  const { data, isPending, error } = useCVs<CV>()
+  const cvs: CV[] = useMemo(() => data ?? [], [data])
+  const isLoading = isPending
+  const pageError = error ? error.message : ''
+
   const [feedbackCv, setFeedbackCv] = useState<CV | null>(null)
   const [enhancementCv, setEnhancementCv] = useState<CV | null>(null)
   const [isUploadOpen, setIsUploadOpen] = useState(false)
-  const [pageError, setPageError] = useState('')
 
-  const loadCVs = useCallback(async () => {
-    const result = await fetchCVs()
-    if (result.error) {
-      setPageError(result.error)
-      toastError(result.error)
-    } else {
-      setPageError('')
-    }
-  }, [fetchCVs, toastError])
-
-  useEffect(() => {
-    loadCVs()
-  }, [loadCVs])
+  const loadCVs = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: queryKeys.cvs() })
+  }, [queryClient])
 
   const liveCvs = useMemo(() => cvs.filter((cv) => LIVE_STATES.includes(cv.status)), [cvs])
 
@@ -591,11 +584,12 @@ export default function CVsPage() {
       body: `${cv.label} will be removed from Jobly. Existing generated documents may no longer have this CV available for future matching.`,
       destructive: true,
       onConfirm: async () => {
-        const result = await deleteCV(cv.id)
+        const result = await cvsApi.deleteCV(cv.id)
         if (result.error) {
           toastError(result.error)
         } else {
           toastSuccess('CV deleted')
+          loadCVs()
         }
       },
     })

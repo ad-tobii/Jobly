@@ -5,6 +5,8 @@ const pdfParse = require('pdf-parse');
 import supabase from '../config/supabase.js';
 import redis from '../config/redis.js';
 import Groq from 'groq-sdk';
+import { workerLogger } from '../config/logger.js';
+import { onCompleted, onFailed, onWorkerError } from '../utils/workerFailure.js';
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
@@ -363,7 +365,9 @@ Return ONLY valid JSON:
 
     console.log(`[cvWorker] CV ${cv_id} fully processed ✓`);
     } catch (err) {
-      await supabase.from('cvs').update({ status: 'failed' }).eq('id', cv_id);
+      // Deliberately no status write here — the 'failed' handler below marks
+      // the CV failed only once BullMQ has exhausted its retries. Writing it
+      // here would flap the status to 'failed' between attempts.
       throw err;
     }
   },
@@ -375,16 +379,10 @@ Return ONLY valid JSON:
 
 // ── Worker event hooks ────────────────────────────────────────────────────────
 
-cvWorker.on('completed', (job) => {
-  console.log(`[cvWorker] Job ${job.id} completed`);
-});
+const log = workerLogger('cv');
 
-cvWorker.on('failed', (job, err) => {
-  console.error(`[cvWorker] Job ${job.id} failed — ${err.message}`);
-});
-
-cvWorker.on('error', (err) => {
-  console.error(`[cvWorker] Worker error:`, err);
-});
+cvWorker.on('completed', onCompleted(log));
+cvWorker.on('failed', onFailed({ log, table: 'cvs', idFrom: (data) => data.cv_id }));
+cvWorker.on('error', onWorkerError(log));
 
 export default cvWorker;
